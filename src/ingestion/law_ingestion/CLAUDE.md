@@ -8,6 +8,28 @@
 
 ---
 
+## LawReader 與 CitationExtractor 的關係
+
+兩者是**生產者 → 消費者**關係，由呼叫端（`cmd/load_laws/main.py`）串起來。
+流程必須分兩階段，不能邊讀邊解析：
+
+```
+LawReader.load()
+    → list[Law]
+        → LawReader.build_name_to_pcode(laws)
+            → dict[law_name → pcode]
+                → CitationExtractor(lookup)
+                    → extractor.extract_from_law(law)  # 對每部法律跑一次
+```
+
+**為何要兩階段：** `CitationExtractor` 初始化時需要完整的 `law_name → pcode`
+lookup table，才能辨識跨法律引用。若邊讀邊解析，後面的法律引用到尚未讀到的
+法律就會 miss。
+
+`LawReader` 只負責 I/O，`CitationExtractor` 只負責解析，兩者沒有直接依賴。
+
+---
+
 ## 條文引用（cited_articles）解析規則
 
 ### 關鍵發現
