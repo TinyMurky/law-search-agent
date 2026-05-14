@@ -1,0 +1,210 @@
+"""條文引用關係解析器。
+
+解析 Article.artical_content 內的條文引用，
+將結果寫入 Article.cited_articles。
+cited_articles 格式："{pcode}#{ArticleNo}"。
+
+解析優先順序：
+1. 範圍引用（至）：第X條至第Y條 → 展開全部
+2. 並列引用（及）：第X條及第Y條 → 各引用一次
+3. 本法自引：本法第X條 → 使用當前條文的 pcode
+   （須在 cross-law 之前，避免「本法」被封鎖器消費）
+4. 跨法律引用：民法第X條 → 查 lookup 取得 pcode
+   （不在 lookup 的法律也消費位置，避免 bare ref 誤判）
+5. 裸露引用：第X條（無法律名稱前綴）→ 視為同法引用
+6. 相對引用：前條 / 次條 → 依條文位置推算
+"""
+
+import re
+
+from .article import Article
+from .chinese_numeral import chinese_to_int
+from .law import Law
+
+_CHINESE_NUM = r"[一二三四五六七八九十百千零]+"
+
+_RANGE_ZHI_RE = re.compile(
+    rf"第({_CHINESE_NUM})條至第({_CHINESE_NUM})條"
+)
+_RANGE_JI_RE = re.compile(
+    rf"第({_CHINESE_NUM})條及第({_CHINESE_NUM})條"
+)
+_SELF_REF_RE = re.compile(
+    rf"(?:本法|本條例|本辦法|本規則|本細則|本準則|本規程)"
+    rf"第({_CHINESE_NUM})條"
+)
+# 未知法律封鎖器：匹配所有「法律名稱 + 第X條」的位置。
+# 僅消費位置，不引用，防止 bare ref 誤判為同法引用。
+_UNKNOWN_LAW_BLOCKER_RE = re.compile(
+    rf"(?:[^\s，。、；：（）「」\r\n]{{1,20}}?"
+    rf"(?:法|條例|辦法|規則|細則|準則|規程))"
+    rf"第(?:{_CHINESE_NUM})條"
+)
+_BARE_RE = re.compile(rf"第({_CHINESE_NUM})條")
+_PREV_RE = re.compile(r"前條")
+_NEXT_RE = re.compile(r"次條")
+
+_Consumed = set[tuple[int, int]]
+
+
+class CitationExtractor:
+    """從條文內容解析引用關係，寫入 Article.cited_articles。
+
+    lookup table 在 __init__ 注入一次，對所有法律共用。
+    """
+
+    def __init__(self, law_name_to_pcode: dict[str, str]) -> None:
+        self._lookup = law_name_to_pcode
+        self._known_cross_law_re = (
+            self._build_known_cross_law_pattern(law_name_to_pcode)
+        )
+
+    def extract_from_law(self, law: Law) -> None:
+        """解析整部法律的引用，直接寫入各 Article.cited_articles。
+        """
+        ordered = [a for a in law.articles if a.article_type == "A"]
+        for article in ordered:
+            article.cited_articles = self._extract(article, ordered)
+
+    def _extract(
+        self, article: Article, ordered: list[Article]
+    ) -> list[str]:
+        content = article.artical_content
+        pcode = article.pcode
+        consumed: _Consumed = set()
+        cited: list[str] = []
+
+        cited += self._extract_range_zhi(content, pcode, consumed)
+        cited += self._extract_range_ji(content, pcode, consumed)
+        cited += self._extract_self_ref(content, pcode, consumed)
+        cited += self._extract_cross_law(content, consumed)
+        self._consume_unknown_laws(content, consumed)
+        cited += self._extract_bare(content, pcode, consumed)
+        cited += self._extract_relative(article, ordered, pcode, content)
+
+        return list(dict.fromkeys(cited))  # 去重，保留順序
+
+    def _extract_range_zhi(
+        self, content: str, pcode: str, consumed: _Consumed
+    ) -> list[str]:
+        """範圍引用（至）→ 展開為連續條文。"""
+        result: list[str] = []
+        for m in _RANGE_ZHI_RE.finditer(content):
+            start = chinese_to_int(m.group(1))
+            end = chinese_to_int(m.group(2))
+            for n in range(start, end + 1):
+                result.append(f"{pcode}#第 {n} 條")
+            consumed.add((m.start(), m.end()))
+        return result
+
+    def _extract_range_ji(
+        self, content: str, pcode: str, consumed: _Consumed
+    ) -> list[str]:
+        """並列引用（及）→ 各自引用，不展開。"""
+        result: list[str] = []
+        for m in _RANGE_JI_RE.finditer(content):
+            if self._is_consumed(m, consumed):
+                continue
+            result.append(
+                f"{pcode}#第 {chinese_to_int(m.group(1))} 條"
+            )
+            result.append(
+                f"{pcode}#第 {chinese_to_int(m.group(2))} 條"
+            )
+            consumed.add((m.start(), m.end()))
+        return result
+
+    def _extract_self_ref(
+        self, content: str, pcode: str, consumed: _Consumed
+    ) -> list[str]:
+        """本法自引（本法第X條）。"""
+        result: list[str] = []
+        for m in _SELF_REF_RE.finditer(content):
+            if self._is_consumed(m, consumed):
+                continue
+            result.append(
+                f"{pcode}#第 {chinese_to_int(m.group(1))} 條"
+            )
+            consumed.add((m.start(), m.end()))
+        return result
+
+    def _extract_cross_law(
+        self, content: str, consumed: _Consumed
+    ) -> list[str]:
+        """已知跨法律引用 — 精準 match lookup 中的法律名稱。"""
+        result: list[str] = []
+        if not self._known_cross_law_re:
+            return result
+        for m in self._known_cross_law_re.finditer(content):
+            if self._is_consumed(m, consumed):
+                continue
+            ref_pcode = self._lookup.get(m.group(1), "")
+            if ref_pcode:
+                no = chinese_to_int(m.group(2))
+                result.append(f"{ref_pcode}#第 {no} 條")
+            consumed.add((m.start(), m.end()))
+        return result
+
+    def _consume_unknown_laws(
+        self, content: str, consumed: _Consumed
+    ) -> None:
+        """未知法律封鎖 — 消費位置，避免 bare ref 誤判。"""
+        for m in _UNKNOWN_LAW_BLOCKER_RE.finditer(content):
+            if not self._is_consumed(m, consumed):
+                consumed.add((m.start(), m.end()))
+
+    def _extract_bare(
+        self, content: str, pcode: str, consumed: _Consumed
+    ) -> list[str]:
+        """裸露引用（第X條，無法律名稱前綴）→ 同法引用。"""
+        result: list[str] = []
+        for m in _BARE_RE.finditer(content):
+            if self._is_consumed(m, consumed):
+                continue
+            result.append(
+                f"{pcode}#第 {chinese_to_int(m.group(1))} 條"
+            )
+        return result
+
+    def _extract_relative(
+        self,
+        article: Article,
+        ordered: list[Article],
+        pcode: str,
+        content: str,
+    ) -> list[str]:
+        """相對引用（前條 / 次條）→ 依條文位置推算。"""
+        result: list[str] = []
+        try:
+            idx = next(
+                i
+                for i, a in enumerate(ordered)
+                if a.article_no == article.article_no
+            )
+        except StopIteration:
+            return result
+
+        if _PREV_RE.search(content) and idx > 0:
+            result.append(f"{pcode}#{ordered[idx - 1].article_no}")
+        if _NEXT_RE.search(content) and idx < len(ordered) - 1:
+            result.append(f"{pcode}#{ordered[idx + 1].article_no}")
+
+        return result
+
+    @staticmethod
+    def _build_known_cross_law_pattern(
+        lookup: dict[str, str],
+    ) -> re.Pattern | None:
+        if not lookup:
+            return None
+        # 長名稱優先，避免短名稱提前 match
+        # 例如「任用法」不應比「公務人員任用法」先 match
+        sorted_names = sorted(lookup.keys(), key=len, reverse=True)
+        names_alt = "|".join(re.escape(n) for n in sorted_names)
+        return re.compile(rf"({names_alt})第({_CHINESE_NUM})條")
+
+    @staticmethod
+    def _is_consumed(
+        m: re.Match, consumed: _Consumed
+    ) -> bool:
+        return any(s <= m.start() < e for s, e in consumed)
