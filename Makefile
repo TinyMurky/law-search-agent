@@ -2,7 +2,7 @@
 
 .PHONY: load-laws
 load-laws: ## load-laws will load raw data of law (in json form) to graph and vectorDB
-	@uv run src/cmd/load_laws/main.py
+	@PYTHONPATH=src uv run src/cmd/load_laws/main.py
 
 .PHONY: install-python
 install-python: ## install python version of PYTHON_VERSION
