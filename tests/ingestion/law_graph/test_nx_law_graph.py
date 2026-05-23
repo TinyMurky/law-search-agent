@@ -23,6 +23,34 @@ def graph() -> NxLawGraph:
     return NxLawGraph(G)
 
 
+# --- get_related ---
+
+def test_get_related_out(graph: NxLawGraph) -> None:
+    result = graph.get_related("B0000001#第 1 條", "cites", "out")
+    assert result == ["B0000001#第 2 條"]
+
+
+def test_get_related_in(graph: NxLawGraph) -> None:
+    result = graph.get_related("B0000001#第 2 條", "cites", "in")
+    assert set(result) == {
+        "B0000001#第 1 條",
+        "B0000001#第 3 條",
+    }
+
+
+def test_get_related_wrong_relation(graph: NxLawGraph) -> None:
+    result = graph.get_related(
+        "B0000001#第 1 條", "contains", "out"
+    )
+    assert result == []
+
+
+def test_get_related_node_not_exist(graph: NxLawGraph) -> None:
+    assert graph.get_related("X0000000", "cites", "out") == []
+
+
+# --- 便利方法（內部呼叫 get_related）---
+
 def test_get_cited_articles(graph: NxLawGraph) -> None:
     cited = graph.get_cited_articles("B0000001", "第 1 條")
     assert cited == ["B0000001#第 2 條"]

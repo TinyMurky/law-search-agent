@@ -1,5 +1,10 @@
 from .builder import LawGraphBuilder
 from .nx_law_graph import NxLawGraph
-from .protocol import LawGraphProtocol
+from .protocol import Direction, LawGraphProtocol
 
-__all__ = ["LawGraphBuilder", "LawGraphProtocol", "NxLawGraph"]
+__all__ = [
+    "Direction",
+    "LawGraphBuilder",
+    "LawGraphProtocol",
+    "NxLawGraph",
+]
