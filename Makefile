@@ -4,6 +4,14 @@
 load-laws: ## load-laws will load raw data of law (in json form) to graph and vectorDB
 	@PYTHONPATH=src uv run src/cmd/load_laws/main.py
 
+.PHONY: build-chunks
+build-chunks: ## build Chroma chunks collection (reuse persisted DB if it exists)
+	@PYTHONPATH=src uv run src/cmd/build_chunks/main.py
+
+.PHONY: rebuild-chunks
+rebuild-chunks: ## force clear and re-embed all chunks into Chroma
+	@PYTHONPATH=src uv run src/cmd/build_chunks/main.py --force
+
 .PHONY: install-python
 install-python: ## install python version of PYTHON_VERSION
 	@uv python install ${PYTHON_VERSION}
