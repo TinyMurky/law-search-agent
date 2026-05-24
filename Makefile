@@ -4,12 +4,17 @@
 load-laws: ## load-laws will load raw data of law (in json form) to graph and vectorDB
 	@PYTHONPATH=src uv run src/cmd/load_laws/main.py
 
+# Chunk embedding workflow:
+#   build-chunks   — 安全的日常指令。DB 已滿時只做本地 ID 查詢（不呼叫 API，~30 秒）；
+#                    若上次因 API 配額中斷，會從斷點接續 embed 剩餘條文。
+#   rebuild-chunks — 清空 DB 後從零重新 embed 全部 47,065 筆條文（呼叫 Gemini API，~40 分鐘）。
+
 .PHONY: build-chunks
-build-chunks: ## build Chroma chunks collection (reuse persisted DB if it exists)
+build-chunks: ## resume / show results（DB 已滿則跳過 API；中斷後接續）
 	@PYTHONPATH=src uv run src/cmd/build_chunks/main.py
 
 .PHONY: rebuild-chunks
-rebuild-chunks: ## force clear and re-embed all chunks into Chroma
+rebuild-chunks: ## 清空 DB 並重新 embed 全部條文（慢，消耗 API 配額）
 	@PYTHONPATH=src uv run src/cmd/build_chunks/main.py --force
 
 .PHONY: install-python
