@@ -6,3 +6,4 @@ raw_data/
 .mypy_cache/
 .pytest_cache/
 chroma_db/
+.claude_session
