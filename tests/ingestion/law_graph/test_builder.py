@@ -77,7 +77,7 @@ def test_cites_edge_created() -> None:
             },
         ],
     })
-    law.articles[0].cited_articles = ["B0000001#第 2 條"]
+    law.articles[0].cited_articles = [("B0000001#第 2 條", "bare")]
     g = LawGraphBuilder().build([law])
     cited = g.get_cited_articles("B0000001", "第 1 條")
     assert "B0000001#第 2 條" in cited

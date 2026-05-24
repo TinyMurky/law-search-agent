@@ -145,12 +145,15 @@ vectorstore = Chroma(persist_directory="./chroma_db", embedding_function=embeddi
 - 純 Python in-memory 圖，零設定
 - 適合快速驗證 LangGraph agent 邏輯
 - 缺點：不持久化，重啟後需重新建圖
+- 節點與邊的屬性以 TypedDict 定義，提供 mypy 型別安全
 
-```python
-import networkx as nx
-G = nx.DiGraph()
-G.add_edge("民法第184條", "民法第185條", relation="references")
-```
+節點型態：`Law`（id = pcode）、`Article`（id = `{pcode}#{article_no}`）
+
+邊型態（`relation` 屬性）：
+- `"contains"`：Law → Article
+- `"cites"`：Article → Article，附帶 `citation_type`（見 `CitationType`）
+
+詳細實作見 `src/ingestion/law_graph/CLAUDE.md`。
 
 ### 第二階段：Neo4j（與向量資料庫合併）
 

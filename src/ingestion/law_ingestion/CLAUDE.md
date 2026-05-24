@@ -53,11 +53,19 @@ lookup table，才能辨識跨法律引用。若邊讀邊解析，後面的法�
 ### cited_articles 格式
 
 ```
-"{pcode}#{ArticleNo}"
+(「{pcode}#{ArticleNo}」, CitationType)
+
+CitationType 值：
+  "range_zhi" — 第X條至第Y條
+  "range_ji"  — 第X條及第Y條
+  "self_ref"  — 本法第X條
+  "cross_law" — 民法第X條（跨法律）
+  "bare"      — 第X條（無前綴，同法引用）
+  "relative"  — 前條 / 次條
 
 範例：
-"A0000001#第 1 條"
-"B0000001#第 25 條"
+("A0000001#第 1 條", "bare")
+("B0000001#第 25 條", "cross_law")
 ```
 
 ### 解析流程

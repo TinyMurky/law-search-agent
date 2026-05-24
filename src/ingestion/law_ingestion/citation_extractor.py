@@ -2,7 +2,7 @@
 
 解析 Article.artical_content 內的條文引用，
 將結果寫入 Article.cited_articles。
-cited_articles 格式："{pcode}#{ArticleNo}"。
+cited_articles 格式：(「{pcode}#{ArticleNo}」, CitationType)。
 
 解析優先順序：
 1. 範圍引用（至）：第X條至第Y條 → 展開全部
@@ -19,6 +19,7 @@ import re
 
 from .article import Article
 from .chinese_numeral import chinese_to_int
+from .citation_types import CitationType
 from .law import Law
 
 _CHINESE_NUM = r"[一二三四五六七八九十百千零]+"
@@ -45,6 +46,7 @@ _PREV_RE = re.compile(r"前條")
 _NEXT_RE = re.compile(r"次條")
 
 _Consumed = set[tuple[int, int]]
+_CitedList = list[tuple[str, CitationType]]
 
 
 class CitationExtractor:
@@ -68,11 +70,11 @@ class CitationExtractor:
 
     def _extract(
         self, article: Article, ordered: list[Article]
-    ) -> list[str]:
+    ) -> _CitedList:
         content = article.artical_content
         pcode = article.pcode
         consumed: _Consumed = set()
-        cited: list[str] = []
+        cited: _CitedList = []
 
         cited += self._extract_range_zhi(content, pcode, consumed)
         cited += self._extract_range_ji(content, pcode, consumed)
@@ -82,57 +84,65 @@ class CitationExtractor:
         cited += self._extract_bare(content, pcode, consumed)
         cited += self._extract_relative(article, ordered, pcode, content)
 
-        return list(dict.fromkeys(cited))  # 去重，保留順序
+        # 去重，以 node_id 為 key，保留第一次出現的 CitationType
+        seen: dict[str, CitationType] = {}
+        for node_id, ctype in cited:
+            if node_id not in seen:
+                seen[node_id] = ctype
+        return list(seen.items())
 
     def _extract_range_zhi(
         self, content: str, pcode: str, consumed: _Consumed
-    ) -> list[str]:
+    ) -> _CitedList:
         """範圍引用（至）→ 展開為連續條文。"""
-        result: list[str] = []
+        result: _CitedList = []
         for m in _RANGE_ZHI_RE.finditer(content):
             start = chinese_to_int(m.group(1))
             end = chinese_to_int(m.group(2))
             for n in range(start, end + 1):
-                result.append(f"{pcode}#第 {n} 條")
+                result.append((f"{pcode}#第 {n} 條", "range_zhi"))
             consumed.add((m.start(), m.end()))
         return result
 
     def _extract_range_ji(
         self, content: str, pcode: str, consumed: _Consumed
-    ) -> list[str]:
+    ) -> _CitedList:
         """並列引用（及）→ 各自引用，不展開。"""
-        result: list[str] = []
+        result: _CitedList = []
         for m in _RANGE_JI_RE.finditer(content):
             if self._is_consumed(m, consumed):
                 continue
-            result.append(
-                f"{pcode}#第 {chinese_to_int(m.group(1))} 條"
-            )
-            result.append(
-                f"{pcode}#第 {chinese_to_int(m.group(2))} 條"
-            )
+            result.append((
+                f"{pcode}#第 {chinese_to_int(m.group(1))} 條",
+                "range_ji",
+            ))
+            result.append((
+                f"{pcode}#第 {chinese_to_int(m.group(2))} 條",
+                "range_ji",
+            ))
             consumed.add((m.start(), m.end()))
         return result
 
     def _extract_self_ref(
         self, content: str, pcode: str, consumed: _Consumed
-    ) -> list[str]:
+    ) -> _CitedList:
         """本法自引（本法第X條）。"""
-        result: list[str] = []
+        result: _CitedList = []
         for m in _SELF_REF_RE.finditer(content):
             if self._is_consumed(m, consumed):
                 continue
-            result.append(
-                f"{pcode}#第 {chinese_to_int(m.group(1))} 條"
-            )
+            result.append((
+                f"{pcode}#第 {chinese_to_int(m.group(1))} 條",
+                "self_ref",
+            ))
             consumed.add((m.start(), m.end()))
         return result
 
     def _extract_cross_law(
         self, content: str, consumed: _Consumed
-    ) -> list[str]:
+    ) -> _CitedList:
         """已知跨法律引用 — 精準 match lookup 中的法律名稱。"""
-        result: list[str] = []
+        result: _CitedList = []
         if not self._known_cross_law_re:
             return result
         for m in self._known_cross_law_re.finditer(content):
@@ -141,7 +151,9 @@ class CitationExtractor:
             ref_pcode = self._lookup.get(m.group(1), "")
             if ref_pcode:
                 no = chinese_to_int(m.group(2))
-                result.append(f"{ref_pcode}#第 {no} 條")
+                result.append(
+                    (f"{ref_pcode}#第 {no} 條", "cross_law")
+                )
             consumed.add((m.start(), m.end()))
         return result
 
@@ -155,15 +167,16 @@ class CitationExtractor:
 
     def _extract_bare(
         self, content: str, pcode: str, consumed: _Consumed
-    ) -> list[str]:
+    ) -> _CitedList:
         """裸露引用（第X條，無法律名稱前綴）→ 同法引用。"""
-        result: list[str] = []
+        result: _CitedList = []
         for m in _BARE_RE.finditer(content):
             if self._is_consumed(m, consumed):
                 continue
-            result.append(
-                f"{pcode}#第 {chinese_to_int(m.group(1))} 條"
-            )
+            result.append((
+                f"{pcode}#第 {chinese_to_int(m.group(1))} 條",
+                "bare",
+            ))
         return result
 
     def _extract_relative(
@@ -172,9 +185,9 @@ class CitationExtractor:
         ordered: list[Article],
         pcode: str,
         content: str,
-    ) -> list[str]:
+    ) -> _CitedList:
         """相對引用（前條 / 次條）→ 依條文位置推算。"""
-        result: list[str] = []
+        result: _CitedList = []
         try:
             idx = next(
                 i
@@ -185,9 +198,15 @@ class CitationExtractor:
             return result
 
         if _PREV_RE.search(content) and idx > 0:
-            result.append(f"{pcode}#{ordered[idx - 1].article_no}")
+            result.append((
+                f"{pcode}#{ordered[idx - 1].article_no}",
+                "relative",
+            ))
         if _NEXT_RE.search(content) and idx < len(ordered) - 1:
-            result.append(f"{pcode}#{ordered[idx + 1].article_no}")
+            result.append((
+                f"{pcode}#{ordered[idx + 1].article_no}",
+                "relative",
+            ))
 
         return result
 
