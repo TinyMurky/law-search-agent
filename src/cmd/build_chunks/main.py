@@ -40,20 +40,23 @@ def _build_graph(laws: list[Law]) -> None:
 def _build_chunks(
     builder: ChunkBuilder, laws: list[Law], force: bool
 ) -> int:
-    if builder.is_populated() and not force:
-        n = builder.count()
-        print(f"使用已存在的 chunks（{n} 筆），跳過建立")
-        return n
     if force:
         print("清除舊資料並重新建立 chunks...")
         builder.clear()
+    current = builder.count()
+    if current > 0:
+        print(f"繼續建立 chunks（目前 {current} 筆）...")
     else:
         print("建立 chunks...")
     t0 = time.time()
-    n = builder.build(laws, batch_sleep=2.0)
+    added = builder.build(laws, batch_sleep=2.0)
     elapsed = time.time() - t0
-    print(f"完成：{n} 筆 chunk，耗時 {elapsed:.1f} 秒")
-    return n
+    total = builder.count()
+    print(
+        f"新增 {added} 筆，總計 {total} 筆，"
+        f"耗時 {elapsed:.1f} 秒"
+    )
+    return added
 
 
 def _print_peek(builder: ChunkBuilder) -> None:

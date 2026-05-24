@@ -35,6 +35,24 @@ def _collect(
     return docs, ids, metas
 
 
+def _filter_new(
+    b_docs: list[str],
+    b_ids: list[str],
+    b_metas: list[dict[str, str]],
+    existing: set[str],
+) -> tuple[list[str], list[str], list[dict[str, str]]]:
+    """Return only the items whose IDs are not yet in Chroma."""
+    new_docs: list[str] = []
+    new_ids: list[str] = []
+    new_metas: list[dict[str, str]] = []
+    for d, id_, m in zip(b_docs, b_ids, b_metas):
+        if id_ not in existing:
+            new_docs.append(d)
+            new_ids.append(id_)
+            new_metas.append(m)
+    return new_docs, new_ids, new_metas
+
+
 class ChunkBuilder:
     """Builds and queries the Chroma 'chunks' collection."""
 
@@ -61,19 +79,34 @@ class ChunkBuilder:
     def build(
         self, laws: list[Law], batch_sleep: float = 0.0
     ) -> int:
+        """Embed laws into Chroma, skipping IDs that already exist.
+
+        Returns the number of newly added chunks.
+        """
         docs, ids, metas = _collect(laws)
         total = len(docs)
+        added = 0
         with tqdm(total=total, unit="chunk") as pbar:
             for i in range(0, total, _BATCH_SIZE):
-                batch = docs[i:i + _BATCH_SIZE]
-                self._col.add_texts(
-                    texts=batch,
-                    ids=ids[i:i + _BATCH_SIZE],
-                    metadatas=metas[i:i + _BATCH_SIZE],
+                b_docs = docs[i:i + _BATCH_SIZE]
+                b_ids = ids[i:i + _BATCH_SIZE]
+                b_metas = metas[i:i + _BATCH_SIZE]
+                existing: set[str] = set(
+                    self._col.get(ids=b_ids)["ids"] or []
                 )
-                pbar.update(len(batch))
-                time.sleep(batch_sleep)
-        return total
+                n_docs, n_ids, n_metas = _filter_new(
+                    b_docs, b_ids, b_metas, existing
+                )
+                if n_ids:
+                    self._col.add_texts(
+                        texts=n_docs,
+                        ids=n_ids,
+                        metadatas=n_metas,
+                    )
+                    added += len(n_ids)
+                    time.sleep(batch_sleep)
+                pbar.update(len(b_docs))
+        return added
 
     def clear(self) -> None:
         self._col.delete_collection()

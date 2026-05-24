@@ -89,11 +89,20 @@ def test_is_populated_false_initially(
     assert not builder.is_populated()
 
 
-def test_build_returns_article_count(
+def test_build_returns_newly_added_count(
     builder: ChunkBuilder, law: Law
 ) -> None:
     count = builder.build([law])
     assert count == 2  # 2 "A" articles; 1 "C" chapter is skipped
+
+
+def test_build_is_idempotent(
+    builder: ChunkBuilder, law: Law
+) -> None:
+    builder.build([law])
+    second = builder.build([law])
+    assert second == 0        # nothing new to add
+    assert builder.count() == 2  # DB unchanged
 
 
 def test_count_after_build(
