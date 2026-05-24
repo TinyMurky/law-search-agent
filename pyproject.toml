@@ -23,6 +23,7 @@ dev = [
     "pytest-asyncio>=1.3.0",
     "python-lsp-server>=1.14.0",
     "types-networkx>=3.6.1.20260518",
+    "types-tqdm>=4.67.3.20260518",
 ]
 
 [tool.pytest.ini_options]

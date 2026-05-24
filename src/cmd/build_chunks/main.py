@@ -1,4 +1,5 @@
 import argparse
+import os
 import time
 from pathlib import Path
 
@@ -49,7 +50,7 @@ def _build_chunks(
     else:
         print("建立 chunks...")
     t0 = time.time()
-    n = builder.build(laws)
+    n = builder.build(laws, batch_sleep=2.0)
     elapsed = time.time() - t0
     print(f"完成：{n} 筆 chunk，耗時 {elapsed:.1f} 秒")
     return n
@@ -93,8 +94,14 @@ def main() -> None:
     laws = _load_laws()
     _build_graph(laws)
 
+    api_key = (
+        os.getenv("GEMINI_TOKEN")
+        or os.getenv("GEMINI_API_KEY")
+        or os.getenv("GOOGLE_API_KEY")
+    )
     embeddings = GoogleGenerativeAIEmbeddings(
-        model="models/text-embedding-004"
+        model="models/gemini-embedding-001",
+        google_api_key=api_key,
     )
     builder = ChunkBuilder(
         persist_directory=_CHROMA_DIR,

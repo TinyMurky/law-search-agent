@@ -1,9 +1,12 @@
+import time
+
 from langchain_chroma import Chroma
 from langchain_core.embeddings import Embeddings
+from tqdm import tqdm
 
 from ingestion.law_ingestion.law import Law
 
-_BATCH_SIZE = 512
+_BATCH_SIZE = 100
 _COLLECTION_NAME = "chunks"
 
 
@@ -55,15 +58,22 @@ class ChunkBuilder:
     def is_populated(self) -> bool:
         return self.count() > 0
 
-    def build(self, laws: list[Law]) -> int:
+    def build(
+        self, laws: list[Law], batch_sleep: float = 0.0
+    ) -> int:
         docs, ids, metas = _collect(laws)
-        for i in range(0, len(docs), _BATCH_SIZE):
-            self._col.add_texts(
-                texts=docs[i:i + _BATCH_SIZE],
-                ids=ids[i:i + _BATCH_SIZE],
-                metadatas=metas[i:i + _BATCH_SIZE],
-            )
-        return len(docs)
+        total = len(docs)
+        with tqdm(total=total, unit="chunk") as pbar:
+            for i in range(0, total, _BATCH_SIZE):
+                batch = docs[i:i + _BATCH_SIZE]
+                self._col.add_texts(
+                    texts=batch,
+                    ids=ids[i:i + _BATCH_SIZE],
+                    metadatas=metas[i:i + _BATCH_SIZE],
+                )
+                pbar.update(len(batch))
+                time.sleep(batch_sleep)
+        return total
 
     def clear(self) -> None:
         self._col.delete_collection()

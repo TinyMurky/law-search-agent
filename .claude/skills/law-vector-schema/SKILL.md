@@ -20,11 +20,11 @@ Vector DB（Chroma）負責**語意查詢**，NetworkX 負責**結構查詢**。
 
 ## Embedding Model
 
-**`models/text-embedding-004`**（Google）— 與 Gemini 同生態系，繁體中文支援佳。
+**`models/gemini-embedding-001`**（Google）— 取代 text-embedding-004，與 Gemini 同生態系，繁體中文支援佳。
 
 ```python
 from langchain_google_genai import GoogleGenerativeAIEmbeddings
-embeddings = GoogleGenerativeAIEmbeddings(model="models/text-embedding-004")
+embeddings = GoogleGenerativeAIEmbeddings(model="models/gemini-embedding-001")
 ```
 
 ## Collections 總覽

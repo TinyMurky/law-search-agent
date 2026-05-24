@@ -55,7 +55,7 @@ law-searching-agent 目標為協助使用者搜索法律條文與判決書, 有�
 | 層級 | 工具 | 說明 |
 |---|---|---|
 | **LLM** | Gemini API | `langchain-google-genai` |
-| **Embedding** | text-embedding-004 | Google 官方 embedding，與 Gemini 同生態系 |
+| **Embedding** | gemini-embedding-001 | Google 官方 embedding，與 Gemini 同生態系 |
 | **Agent Framework** | LangGraph + LangChain | agent 主框架 |
 | **向量搜尋（第一階段）** | Chroma | 本地語義搜尋 |
 | **圖遍歷（第一階段）** | NetworkX | in-memory 圖結構 |
@@ -74,7 +74,7 @@ law-searching-agent 目標為協助使用者搜索法律條文與判決書, 有�
 from langchain_google_genai import ChatGoogleGenerativeAI, GoogleGenerativeAIEmbeddings
 
 llm = ChatGoogleGenerativeAI(model="gemini-2.0-flash")
-embeddings = GoogleGenerativeAIEmbeddings(model="models/text-embedding-004")
+embeddings = GoogleGenerativeAIEmbeddings(model="models/gemini-embedding-001")
 ```
 
 ---
