@@ -17,6 +17,10 @@ build-chunks: ## resume / show results（DB 已滿則跳過 API；中斷後接�
 rebuild-chunks: ## 清空 DB 並重新 embed 全部條文（慢，消耗 API 配額）
 	@PYTHONPATH=src uv run src/cmd/build_chunks/main.py --force
 
+.PHONY: chat
+chat: ## 啟動 terminal 互動 Agent（需先執行 make build-chunks）
+	@PYTHONPATH=src uv run src/cmd/chat/main.py
+
 .PHONY: install-python
 install-python: ## install python version of PYTHON_VERSION
 	@uv python install ${PYTHON_VERSION}
