@@ -7,9 +7,7 @@ from dotenv import load_dotenv
 from langchain_google_genai import GoogleGenerativeAIEmbeddings
 
 from ingestion.law_graph.builder import LawGraphBuilder
-from ingestion.law_ingestion.citation_extractor import (
-    CitationExtractor,
-)
+from ingestion.law_ingestion.citation_extractor import CitationExtractor
 from ingestion.law_ingestion.law import Law
 from ingestion.law_ingestion.law_reader import LawReader
 from ingestion.law_vector.chunk_builder import ChunkBuilder
@@ -37,9 +35,7 @@ def _build_graph(laws: list[Law]) -> None:
     print("圖結構建立完成")
 
 
-def _build_chunks(
-    builder: ChunkBuilder, laws: list[Law], force: bool
-) -> int:
+def _build_chunks(builder: ChunkBuilder, laws: list[Law], force: bool) -> int:
     if force:
         print("清除舊資料並重新建立 chunks...")
         builder.clear()
@@ -52,10 +48,7 @@ def _build_chunks(
     added = builder.build(laws, batch_sleep=2.0)
     elapsed = time.time() - t0
     total = builder.count()
-    print(
-        f"新增 {added} 筆，總計 {total} 筆，"
-        f"耗時 {elapsed:.1f} 秒"
-    )
+    print(f"新增 {added} 筆，總計 {total} 筆，" f"耗時 {elapsed:.1f} 秒")
     return added
 
 
@@ -84,9 +77,7 @@ def _print_search(builder: ChunkBuilder) -> None:
 
 def main() -> None:
     load_dotenv()
-    parser = argparse.ArgumentParser(
-        description="建立 Chroma chunks collection"
-    )
+    parser = argparse.ArgumentParser(description="建立 Chroma chunks collection")
     parser.add_argument(
         "--force",
         action="store_true",
@@ -97,11 +88,9 @@ def main() -> None:
     laws = _load_laws()
     _build_graph(laws)
 
-    api_key = (
-        os.getenv("GEMINI_TOKEN")
-        or os.getenv("GEMINI_API_KEY")
-        or os.getenv("GOOGLE_API_KEY")
-    )
+    api_key = os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY")
+
+    # 以後要作 multimodal embedding 可以升到 002
     embeddings = GoogleGenerativeAIEmbeddings(
         model="models/gemini-embedding-001",
         google_api_key=api_key,

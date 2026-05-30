@@ -47,9 +47,7 @@ class LawGraphBuilder:
                 continue
             self._add_article(G, law, article)
 
-    def _add_article(
-        self, G: nx.DiGraph, law: Law, article: Article
-    ) -> None:
+    def _add_article(self, G: nx.DiGraph, law: Law, article: Article) -> None:
         node_id = f"{article.pcode}#{article.article_no}"
         article_attrs: ArticleNodeAttrs = {
             "type": "article",
@@ -78,6 +76,7 @@ class LawGraphBuilder:
                 "relation": "cites",
                 "citation_type": citation_type,
                 "source_pcode": article.pcode,
+                # 這邊需考慮 source_artical_no 到底是 引用者還是被引用者
                 "source_article_no": article.article_no,
                 "source_paragraph": "",
                 "law_modified_date": law.law_modified_date,
