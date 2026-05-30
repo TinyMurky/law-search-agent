@@ -73,7 +73,7 @@ law-searching-agent 目標為協助使用者搜索法律條文與判決書, 有�
 ```python
 from langchain_google_genai import ChatGoogleGenerativeAI, GoogleGenerativeAIEmbeddings
 
-llm = ChatGoogleGenerativeAI(model="gemini-2.0-flash")
+llm = ChatGoogleGenerativeAI(model="gemini-3.5-flash")
 embeddings = GoogleGenerativeAIEmbeddings(model="models/gemini-embedding-001")
 ```
 

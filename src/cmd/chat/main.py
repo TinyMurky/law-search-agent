@@ -4,7 +4,7 @@ import sys
 from dotenv import load_dotenv
 from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_google_genai import GoogleGenerativeAIEmbeddings
-from langchain_core.messages import HumanMessage
+from langchain_core.messages import HumanMessage, ToolMessage
 
 from ingestion.law_graph.builder import LawGraphBuilder
 from ingestion.law_graph.nx_law_graph import NxLawGraph
@@ -18,7 +18,7 @@ from agent.tools.judgment import make_judgment_tools
 from agent.tools.law import make_law_tools
 
 _RAW_DATA = "raw_data/laws/ChLaw.json"
-_CHROMA_DIR = "chroma_db"
+_CHROMA_DIR = "data/chroma_db"
 
 
 def _check_chunks(builder: ChunkBuilder) -> None:
@@ -60,6 +60,15 @@ def _chat_loop(graph: CompiledStateGraph) -> None:
         result = graph.invoke(
             {"messages": [HumanMessage(content=user_input)]}
         )
+        tool_msgs = [
+            m for m in result["messages"]
+            if isinstance(m, ToolMessage)
+        ]
+        if tool_msgs:
+            names = [m.name for m in tool_msgs]
+            print(f"[工具呼叫] {names}")
+        else:
+            print("[工具呼叫] 無（LLM 直接回答）")
         answer = result["messages"][-1].content
         print(f"\nAgent: {answer}\n")
 
@@ -72,7 +81,7 @@ def main() -> None:
     _check_chunks(chunk_builder)
 
     llm = ChatGoogleGenerativeAI(
-        model="gemini-2.0-flash",
+        model="gemini-3.5-flash",
         google_api_key=api_key,
     )
     tools = (
