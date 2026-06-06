@@ -132,3 +132,13 @@ class NxLawGraph:
             f"{pcode}#{article_no}", "cites", "in"
         )
         return [(nid, cast(CitesEdgeAttrs, e)) for nid, e in pairs]
+
+    def find_pcode_by_name(self, law_name: str) -> str | None:
+        """依法律名稱查找 pcode，找不到回傳 None。"""
+        for node_id, attrs in self._G.nodes(data=True):
+            if (
+                attrs.get("type") == "law"
+                and attrs.get("law_name") == law_name
+            ):
+                return str(node_id)
+        return None
