@@ -193,3 +193,62 @@ def test_get_law_articles_empty_returns_message(
     )
     result = get_arts.invoke({"pcode": "X0000000"})
     assert "找不到" in result
+
+
+# --- get_article ---
+
+def test_get_article_returns_content(
+    mock_builder: MagicMock, mock_graph: MagicMock
+) -> None:
+    mock_graph.get_node.return_value = {
+        "type": "article",
+        "pcode": "B0000001",
+        "law_name": "民法",
+        "article_no": "第 184 條",
+        "content": "因故意或過失，不法侵害他人之權利者，負損害賠償責任。",
+        "source_pcode": "B0000001",
+        "source_article_no": "第 184 條",
+        "source_paragraph": "",
+        "law_modified_date": "20210101",
+        "created_at": "2026-05-30T00:00:00+00:00",
+    }
+    tools = make_law_tools(mock_builder, mock_graph)
+    get_art = next(t for t in tools if t.name == "get_article")
+    result = get_art.invoke({"pcode": "B0000001", "article_no": "第 184 條"})
+    assert "民法" in result
+    assert "第 184 條" in result
+    assert "因故意或過失" in result
+    mock_graph.get_node.assert_called_with("B0000001#第 184 條")
+
+
+def test_get_article_not_found_returns_message(
+    mock_builder: MagicMock, mock_graph: MagicMock
+) -> None:
+    mock_graph.get_node.return_value = None
+    tools = make_law_tools(mock_builder, mock_graph)
+    get_art = next(t for t in tools if t.name == "get_article")
+    result = get_art.invoke({"pcode": "X0000000", "article_no": "第 1 條"})
+    assert "找不到" in result
+    assert "X0000000#第 1 條" in result
+
+
+def test_get_article_law_node_returns_not_found(
+    mock_builder: MagicMock, mock_graph: MagicMock
+) -> None:
+    mock_graph.get_node.return_value = {
+        "type": "law",
+        "law_name": "民法",
+        "law_level": "法律",
+        "law_category": "民事",
+        "law_effective_date": "",
+        "law_abandon_note": "",
+        "source_pcode": "B0000001",
+        "source_article_no": "",
+        "source_paragraph": "",
+        "law_modified_date": "20210101",
+        "created_at": "2026-05-30T00:00:00+00:00",
+    }
+    tools = make_law_tools(mock_builder, mock_graph)
+    get_art = next(t for t in tools if t.name == "get_article")
+    result = get_art.invoke({"pcode": "B0000001", "article_no": "B0000001"})
+    assert "找不到" in result

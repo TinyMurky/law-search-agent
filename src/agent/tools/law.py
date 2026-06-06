@@ -1,5 +1,8 @@
+from typing import cast
+
 from langchain_core.tools import BaseTool, tool
 
+from ingestion.law_graph.nodes import ArticleNodeAttrs
 from ingestion.law_graph.nx_law_graph import NxLawGraph
 from ingestion.law_vector.chunk_builder import ChunkBuilder
 
@@ -51,7 +54,7 @@ def make_law_tools(
 
     @tool
     def get_law_articles(pcode: str) -> str:
-        """列出某部法律的所有條文 ID，可再用其他工具查詢內容。"""
+        """列出某部法律的所有條文 ID，可再用 get_article 查詢個別條文內容。"""
         article_ids = law_graph.get_law_articles(pcode)
         if not article_ids:
             return f"找不到 pcode={pcode} 的條文。"
@@ -60,4 +63,22 @@ def make_law_tools(
         suffix = f"\n（共 {total} 條）" if total > 50 else f"\n（共 {total} 條）"
         return listed + suffix
 
-    return [search_law_articles, get_related_articles, get_law_articles]
+    @tool
+    def get_article(pcode: str, article_no: str) -> str:
+        """取得單一條文的完整內容。article_no 格式如「第 184 條」。"""
+        node_id = f"{pcode}#{article_no}"
+        node = law_graph.get_node(node_id)
+        if node is None or node["type"] != "article":
+            return f"找不到條文：{node_id}"
+        article = cast(ArticleNodeAttrs, node)
+        return (
+            f"【{article['law_name']} {article['article_no']}】\n"
+            f"{article['content']}"
+        )
+
+    return [
+        search_law_articles,
+        get_related_articles,
+        get_law_articles,
+        get_article,
+    ]
