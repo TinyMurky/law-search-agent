@@ -203,6 +203,37 @@ HyDE 假設文件在 `analyze_query` 節點生成（LLM 呼叫），
 
 ---
 
+## Strategy Registry
+
+`src/agent/strategy_registry.py` 是跨節點 strategy policy 的唯一來源。
+
+### 新增 strategy 的流程
+
+1. `StrategyName` Literal 加入新值
+2. `STRATEGY_REGISTRY` 加入對應的 `StrategyConfig`
+3. `retrieve.py` 加入 `if/elif` 分支（retrieval 實作）
+4. `analyze_query.py` prompt 更新（告知 LLM 新 strategy）
+
+### 目前 StrategyConfig 欄位
+
+```python
+class StrategyConfig(TypedDict):
+    requires_grading: bool  # False = grade_documents 自動放行
+```
+
+**預留擴充欄位**（討論後再加）：
+- `source: str` — `"law"` / `"judgment"`
+- `fallback_strategy: str` — rewrite_query fallback
+- `has_score: bool` — 結果是否附帶相似度分數
+
+### retrieve 尚未遷入的原因
+
+`retrieve.py` 各 strategy 的 retrieval 實作（if/elif 分支）
+目前仍在 `retrieve.py`，未來可封裝進 `StrategyConfig` 的 `retriever` 欄位遷出。
+現階段 strategy 僅 5 個，if/elif 可讀性足夠，暫不抽象。
+
+---
+
 ## 路由邏輯
 
 ### grade_documents 之後
@@ -213,7 +244,21 @@ filtered_docs 為空 且 retry_count < max_retries   → "rewrite_query"
 filtered_docs 為空 且 retry_count >= max_retries  → "force_end"
 ```
 
-> **⚠️ TBD：** grade_documents 的 grader 實作方式待確認。
+**設計決策**：threshold 為 0（完全無相關文件才 rewrite），
+不設最低篇數，結果不佳時再調整。
+
+路由函式 `route_after_grade(state)` 實作在 `grade_documents.py`，
+直接作為 LangGraph conditional edge 的 routing function 傳入。
+
+**`law:direct_lookup` 跳過 grading**：使用者明確指定的條文不需判斷相關性。
+`grade_documents.py` 查詢 `STRATEGY_REGISTRY["requires_grading"]`，
+`False` 的 strategy 自動放行。
+`retrieve` 在 Document metadata 帶入 `"strategy"` 欄位供此處使用。
+
+**chunk grade vs graph grade**：不需區分。
+`law:graph_expand` 產出的 Chroma 語意結果和引用展開結果
+metadata strategy 相同，registry 都標記 `requires_grading=True`，一視同仁。
+唯一例外是 `law:direct_lookup`（`requires_grading=False`）。
 
 ### generate 之後
 
@@ -236,7 +281,7 @@ answer grader 不通過 或 regenerate 達上限          → "rewrite_query"
 | `login_node` | 取得司法院 API token（placeholder）| — | `judgment_api_token` |
 | `analyze_query` | 分類 intent，生成 SubQuery 清單 | `question` | `intent`, `complexity`, `rewritten_queries` |
 | `retrieve` | 依 strategy 搜尋，重置 documents | `rewritten_queries` | `documents` |
-| `grade_documents` | 過濾不相關文件，決定下一步 | `question`, `documents` | `documents`（過濾後）|
+| `grade_documents` | LLM 逐篇相關性判斷，過濾不相關文件 | `question`, `documents` | `documents`（過濾後）|
 | `generate` | 生成答案，執行 grader 路由 | `question`, `documents` | `generation` |
 | `rewrite_query` | 改寫查詢，更新 retry_count | `question`, `generation` | `rewritten_queries`, `retry_count` |
 | `force_end` | 達到上限，回傳查無結果說明 | `halt_reason` | `generation` |
@@ -247,16 +292,17 @@ answer grader 不通過 或 regenerate 達上限          → "rewrite_query"
 
 ```
 src/agent/
-  ├── state.py                # AgenticRAGState + SubQuery
+  ├── state.py                # AgenticRAGState + SubQuery（strategy 型別引用 registry）
+  ├── strategy_registry.py    # STRATEGY_REGISTRY + StrategyName + StrategyConfig
   ├── graph.py                # build_graph()，組裝所有節點與路由
   └── nodes/
       ├── __init__.py
-      ├── analyze_query.py    # ✅ 設計完成，見 references/nodes.md
-      ├── retrieve.py         # ⚠️ TBD
-      ├── grade_documents.py  # ⚠️ TBD
+      ├── analyze_query.py    # ✅ 完成
+      ├── retrieve.py         # ✅ 完成
+      ├── grade_documents.py  # ✅ 完成
       ├── generate.py         # ⚠️ TBD
-      ├── rewrite_query.py    # ⚠️ TBD
-      └── force_end.py        # ⚠️ TBD
+      ├── rewrite_query.py    # ✅ 完成
+      └── force_end.py        # ✅ 完成
 ```
 
 > **注意：** 目前 `src/agent/` 仍為舊版架構（`login → agent ⇆ tool → END`），

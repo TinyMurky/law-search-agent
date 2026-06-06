@@ -15,8 +15,14 @@ _EXPAND_K = 3
 
 
 # ── Document 轉換 ─────────────────────────────────────────────────────
+# metadata 中的 "strategy" 欄位供 grade_documents 查詢 STRATEGY_REGISTRY。
+# retrieve 本身的各 strategy 分支（if/elif）目前維持在此處，
+# 未來可將各分支的 retriever 邏輯封裝進 STRATEGY_REGISTRY 的欄位遷出。
 
-def _search_result_to_doc(r: dict[str, object]) -> Document:
+def _search_result_to_doc(
+    r: dict[str, object],
+    strategy: str,
+) -> Document:
     return Document(
         page_content=(
             f"【{r['law_name']} {r['article_no']}】\n{r['content']}"
@@ -27,6 +33,7 @@ def _search_result_to_doc(r: dict[str, object]) -> Document:
             "article_no": r["article_no"],
             "law_name": r["law_name"],
             "source": "law",
+            "strategy": strategy,
         },
     )
 
@@ -34,6 +41,7 @@ def _search_result_to_doc(r: dict[str, object]) -> Document:
 def _article_node_to_doc(
     node_id: str,
     article: ArticleNodeAttrs,
+    strategy: str,
 ) -> Document:
     return Document(
         page_content=(
@@ -46,6 +54,7 @@ def _article_node_to_doc(
             "article_no": article["article_no"],
             "law_name": article["law_name"],
             "source": "law",
+            "strategy": strategy,
         },
     )
 
@@ -78,7 +87,7 @@ def make_retrieve_node(
                 for r in chunk_builder.search(
                     sub["query"], k=_SEARCH_K
                 ):
-                    _add(_search_result_to_doc(r))
+                    _add(_search_result_to_doc(r, strategy))
 
             elif strategy == "law:direct_lookup":
                 pcode = law_graph.find_pcode_by_name(
@@ -96,7 +105,9 @@ def make_retrieve_node(
                     print(f"[retrieve] 找不到條文：{node_id}")
                     continue
                 _add(_article_node_to_doc(
-                    node_id, cast(ArticleNodeAttrs, node)
+                    node_id,
+                    cast(ArticleNodeAttrs, node),
+                    strategy,
                 ))
 
             elif strategy == "law:graph_expand":
@@ -104,7 +115,7 @@ def make_retrieve_node(
                     sub["query"], k=_SEARCH_K
                 )
                 for r in results:
-                    _add(_search_result_to_doc(r))
+                    _add(_search_result_to_doc(r, strategy))
                     node_id_str = cast(str, r["node_id"])
                     pcode = node_id_str.split("#")[0]
                     article_no = node_id_str.split("#", 1)[1]
@@ -120,6 +131,7 @@ def make_retrieve_node(
                             _add(_article_node_to_doc(
                                 cited_id,
                                 cast(ArticleNodeAttrs, cited_node),
+                                strategy,
                             ))
 
             elif strategy == "judgment:tavily":

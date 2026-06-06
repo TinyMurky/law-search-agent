@@ -495,19 +495,133 @@ def make_retrieve_node(
 
 ### 職責
 
-過濾 `documents` 中與 `question` 不相關的文件，決定下一步路由。
+對 `documents` 中每篇文件做 LLM 二元相關性判斷（yes / no），
+過濾不相關文件後決定下一步路由。
 
-> **⚠️ TBD：** grader 實作方式（LLM 判斷 vs 向量 threshold）待確認。
+### 關鍵設計決策
+
+- **LLM grader 而非 score threshold**：`law:direct_lookup` 和
+  `law:graph_expand` 的結果沒有向量相似度分數，只有 LLM 能判斷相關性
+- **threshold = 0**：完全無相關文件才觸發 rewrite，不設最低篇數
+- **`route_after_grade` 是純函式**，直接傳入 LangGraph conditional edge，
+  不放進 node，維持節點職責單純
 
 ### 路由邏輯
 
 ```python
 def route_after_grade(state: AgenticRAGState) -> str:
-    if state["documents"]:
+    if len(state["documents"]) > 0:
         return "generate"
     if state["retry_count"] < state["max_retries"]:
         return "rewrite_query"
     return "force_end"
+```
+
+### Pydantic Schema
+
+```python
+class RelevanceResult(BaseModel):
+    score: Literal["yes", "no"]
+    reason: str  # 一句話說明判斷依據
+```
+
+### 完整程式碼
+
+```python
+# src/agent/nodes/grade_documents.py
+from __future__ import annotations
+
+from collections.abc import Callable
+from typing import Literal
+
+from langchain_core.output_parsers import JsonOutputParser
+from langchain_core.prompts import ChatPromptTemplate
+from langchain_google_genai import ChatGoogleGenerativeAI
+from pydantic import BaseModel, Field
+
+from agent.state import AgenticRAGState
+
+
+class RelevanceResult(BaseModel):
+    score: Literal["yes", "no"] = Field(
+        description="此文件是否與問題相關"
+    )
+    reason: str = Field(description="一句話說明判斷依據")
+
+
+_GRADER_SYSTEM = """\
+你是一個法律文件相關性評分器。
+判斷給定的法律條文是否能協助回答使用者的問題。
+
+評分規則：
+- "yes"：條文內容與問題直接相關，或包含回答問題所需的法律概念
+- "no" ：條文內容與問題無關，或只是泛泛的程序條文
+
+注意：不需要條文「完整回答」問題，只要「有助於回答」就算相關。
+
+{format_instructions}
+只輸出 JSON，不要其他文字。"""
+
+
+def _make_grader_chain(  # type: ignore[no-untyped-def]
+    llm: ChatGoogleGenerativeAI,
+):
+    parser = JsonOutputParser(pydantic_object=RelevanceResult)
+    prompt = ChatPromptTemplate.from_messages([
+        ("system", _GRADER_SYSTEM),
+        ("human", "問題：{question}\n\n條文：{document}"),
+    ])
+    return (
+        prompt.partial(
+            format_instructions=parser.get_format_instructions()
+        )
+        | llm
+        | parser
+    )
+
+
+def route_after_grade(state: AgenticRAGState) -> str:
+    """grade_documents 後的路由，供 LangGraph conditional edge 使用。"""
+    if len(state["documents"]) > 0:
+        return "generate"
+    if state["retry_count"] < state["max_retries"]:
+        return "rewrite_query"
+    return "force_end"
+
+
+def make_grade_documents_node(
+    llm: ChatGoogleGenerativeAI,
+) -> Callable[[AgenticRAGState], dict[str, object]]:
+    grader = _make_grader_chain(llm)
+
+    def grade_documents_node(
+        state: AgenticRAGState,
+    ) -> dict[str, object]:
+        question = state["question"]
+        documents = state["documents"]
+        relevant_docs = []
+
+        for i, doc in enumerate(documents):
+            result: dict[str, object] = grader.invoke({
+                "question": question,
+                "document": doc.page_content,
+            })
+            if result["score"] == "yes":
+                relevant_docs.append(doc)
+                print(f"[grade] Chunk {i + 1}：✓ 相關")
+            else:
+                print(
+                    f"[grade] Chunk {i + 1}："
+                    f"✗ 不相關（{result['reason']}）"
+                )
+
+        print(
+            f"[grade] 保留 {len(relevant_docs)}"
+            f"/{len(documents)} 個文件"
+        )
+        return {"documents": relevant_docs}
+
+    return grade_documents_node
 ```
 
 ---
@@ -539,12 +653,66 @@ def route_after_grade(state: AgenticRAGState) -> str:
 
 ### 職責
 
-依現有資訊重新改寫查詢，讓下次 retrieve 找到更相關文件。
+前一次搜尋無相關文件，從不同角度改寫查詢，清空 documents，
+`retry_count` +1，準備重新進入 retrieve。
 
-> **⚠️ TBD：** 完整程式碼待實作。
+### 關鍵設計決策
 
-輸入：`question`（原始問題不變）、`generation`（上一輪答案，可作改寫參考）
-輸出：`rewritten_queries`（新的 SubQuery 清單）、`retry_count`（+1）
+- **原始 `question` 不變**：grader 始終對比原始問題判斷答案品質
+- **固定 `law:semantic`**：rewrite 的目的是換角度語意搜尋，
+  是最通用的 fallback。未來若需依 intent 選擇策略，
+  可查詢 `STRATEGY_REGISTRY`（見 SKILL.md）
+- **清空 `documents`**：避免舊查詢的不相關文件污染後續 generate
+
+### 完整程式碼
+
+```python
+# src/agent/nodes/rewrite_query.py
+from __future__ import annotations
+
+from collections.abc import Callable
+
+from langchain_core.output_parsers import StrOutputParser
+from langchain_core.prompts import ChatPromptTemplate
+from langchain_google_genai import ChatGoogleGenerativeAI
+
+from agent.state import AgenticRAGState, SubQuery
+
+_REWRITE_SYSTEM = """\
+前一次搜尋沒有找到足夠的相關法律資訊。
+請從完全不同的角度改寫這個問題，嘗試使用不同的術語或關鍵字。
+直接輸出改寫後的查詢，不要說明。"""
+
+
+def make_rewrite_query_node(
+    llm: ChatGoogleGenerativeAI,
+) -> Callable[[AgenticRAGState], dict[str, object]]:
+    prompt = ChatPromptTemplate.from_messages([
+        ("system", _REWRITE_SYSTEM),
+        ("human", "原始問題：{question}\n\n請換個角度改寫："),
+    ])
+    rewrite_chain = prompt | llm | StrOutputParser()
+
+    def rewrite_query_node(
+        state: AgenticRAGState,
+    ) -> dict[str, object]:
+        new_query: str = rewrite_chain.invoke(
+            {"question": state["question"]}
+        )
+        new_retry_count = state["retry_count"] + 1
+        return {
+            "rewritten_queries": [SubQuery(
+                query=new_query,
+                strategy="law:semantic",
+                law_name=None,
+                article_no=None,
+            )],
+            "retry_count": new_retry_count,
+            "documents": [],
+        }
+
+    return rewrite_query_node
+```
 
 ---
 
@@ -552,9 +720,37 @@ def route_after_grade(state: AgenticRAGState) -> str:
 
 ### 職責
 
-達到 `max_retries` 且仍無相關文件，生成查無結果說明寫入 `generation`。
+達到 `max_retries` 且仍無相關文件，生成查無結果說明，
+寫入 `generation` 與 `messages`，並記錄 `halt_reason`。
 
-說明須包含：
-- 告知找不到相關資料
-- 建議使用者換個問法或提供更多資訊
-- 不得憑空捏造法條或判決書
+### 關鍵設計決策
+
+- **不需 LLM**：說明固定格式，不憑空生成內容
+- **`halt_reason = "max_retries_exceeded"`**：供呼叫端或監控工具判斷終止原因
+
+### 完整程式碼
+
+```python
+# src/agent/nodes/force_end.py
+from langchain_core.messages import AIMessage
+from agent.state import AgenticRAGState
+
+
+def force_end_node(
+    state: AgenticRAGState,
+) -> dict[str, object]:
+    question = state["question"]
+    generation = (
+        f"抱歉，在多次嘗試後仍找不到足夠的相關法律資訊來回答：\n"
+        f"「{question}」\n\n"
+        "建議：\n"
+        "1. 換個角度重新提問，加入具體的法律名稱或條號\n"
+        "2. 確認問題是否屬於台灣現行法律的範疇\n"
+        "3. 或直接諮詢律師取得專業意見"
+    )
+    return {
+        "generation": generation,
+        "halt_reason": "max_retries_exceeded",
+        "messages": [AIMessage(content=generation)],
+    }
+```

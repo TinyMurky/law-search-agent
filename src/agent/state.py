@@ -1,8 +1,10 @@
-from typing import Annotated, Literal, TypedDict
+from typing import Annotated, TypedDict
 
 from langchain_core.documents import Document
 from langchain_core.messages import BaseMessage
 from langgraph.graph.message import add_messages
+
+from agent.strategy_registry import StrategyName
 
 
 class LawSearchingState(TypedDict):
@@ -12,13 +14,7 @@ class LawSearchingState(TypedDict):
 
 class SubQuery(TypedDict):
     query: str
-    strategy: Literal[
-        "law:semantic",
-        "law:hyde",
-        "law:direct_lookup",
-        "law:graph_expand",
-        "judgment:tavily",
-    ]
+    strategy: StrategyName  # 唯一來源：strategy_registry.StrategyName
     law_name: str | None
     article_no: str | None
 
