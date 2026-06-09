@@ -35,14 +35,16 @@ def make_rewrite_query_node(
     ) -> dict[str, object]:
         question = state["question"]
         new_query: str = rewrite_chain.invoke({"question": question})
-        new_retry_count = state["retry_count"] + 1
+        new_rewrite_count = state["rewrite_count"] + 1
         print(
-            f"[rewrite] 第 {new_retry_count} 次重試，"
+            f"[rewrite] 第 {new_rewrite_count} 次重寫，"
             f"新查詢：{new_query[:60]}..."
         )
         # rewrite 後固定使用 law:semantic（最通用的 fallback 策略）。
         # 未來若需依 intent 選擇 fallback 策略，
         # 可查詢 STRATEGY_REGISTRY（見 law-rag-agent skill）。
+        # regenerate_count 重置：換搜尋方向後重新給 regenerate 機會。
+        # hallucination_passed 重置：確保下一輪 generate 不誤判為 regenerate。
         return {
             "rewritten_queries": [SubQuery(
                 query=new_query,
@@ -50,8 +52,10 @@ def make_rewrite_query_node(
                 law_name=None,
                 article_no=None,
             )],
-            "retry_count": new_retry_count,
+            "rewrite_count": new_rewrite_count,
             "documents": [],
+            "regenerate_count": 0,
+            "hallucination_passed": True,
         }
 
     return rewrite_query_node

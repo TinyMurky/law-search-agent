@@ -60,9 +60,9 @@ def _make_grader_chain(  # type: ignore[no-untyped-def]
 
 def route_after_grade(state: AgenticRAGState) -> str:
     """grade_documents 後的路由，供 LangGraph conditional edge 使用。"""
-    if len(state["documents"]) > 0:
+    if state["grade_passed"]:
         return "generate"
-    if state["retry_count"] < state["max_retries"]:
+    if state["rewrite_count"] < state["max_rewrites"]:
         return "rewrite_query"
     return "force_end"
 
@@ -109,6 +109,9 @@ def make_grade_documents_node(
             f"[grade] 保留 {len(relevant_docs)}"
             f"/{len(documents)} 個文件"
         )
-        return {"documents": relevant_docs}
+        return {
+            "documents": relevant_docs,
+            "grade_passed": len(relevant_docs) > 0,
+        }
 
     return grade_documents_node

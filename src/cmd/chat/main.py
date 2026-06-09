@@ -2,20 +2,18 @@ import os
 import sys
 
 from dotenv import load_dotenv
+from langchain_core.messages import HumanMessage
 from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_google_genai import GoogleGenerativeAIEmbeddings
-from langchain_core.messages import HumanMessage, ToolMessage
+from langgraph.graph.state import CompiledStateGraph
 
 from ingestion.law_graph.builder import LawGraphBuilder
 from ingestion.law_graph.nx_law_graph import NxLawGraph
 from ingestion.law_ingestion.citation_extractor import CitationExtractor
 from ingestion.law_ingestion.law_reader import LawReader
 from ingestion.law_vector.chunk_builder import ChunkBuilder
-from langgraph.graph.state import CompiledStateGraph
 
 from agent.graph import build_graph
-from agent.tools.judgment import make_judgment_tools
-from agent.tools.law import make_law_tools
 
 _RAW_DATA = "raw_data/laws/ChLaw.json"
 _CHROMA_DIR = "data/chroma_db"
@@ -29,7 +27,9 @@ def _check_chunks(builder: ChunkBuilder) -> None:
         sys.exit(1)
 
 
-def _load_graph(api_key: str | None) -> tuple[ChunkBuilder, NxLawGraph]:
+def _load_deps(
+    api_key: str | None,
+) -> tuple[ChunkBuilder, NxLawGraph]:
     print("載入法規資料中...", flush=True)
     reader = LawReader(_RAW_DATA)
     laws = reader.load()
@@ -47,6 +47,27 @@ def _load_graph(api_key: str | None) -> tuple[ChunkBuilder, NxLawGraph]:
     return chunk_builder, law_graph
 
 
+def _initial_state(question: str) -> dict[str, object]:
+    return {
+        "question": question,
+        "intent": "",
+        "complexity": "",
+        "rewritten_queries": [],
+        "documents": [],
+        "grade_passed": False,
+        "generation": "",
+        "hallucination_passed": True,
+        "answer_passed": True,
+        "rewrite_count": 0,
+        "max_rewrites": 3,
+        "regenerate_count": 0,
+        "max_regenerates": 2,
+        "halt_reason": "",
+        "judgment_api_token": "",
+        "messages": [HumanMessage(content=question)],
+    }
+
+
 def _chat_loop(graph: CompiledStateGraph) -> None:
     print("\n法律搜尋 Agent 已啟動（輸入 exit 離開）\n")
     while True:
@@ -57,19 +78,11 @@ def _chat_loop(graph: CompiledStateGraph) -> None:
             break
         if user_input.lower() in ("exit", "quit", "q", ""):
             break
-        result = graph.invoke(
-            {"messages": [HumanMessage(content=user_input)]}
-        )
-        tool_msgs = [
-            m for m in result["messages"]
-            if isinstance(m, ToolMessage)
-        ]
-        if tool_msgs:
-            names = [m.name for m in tool_msgs]
-            print(f"[工具呼叫] {names}")
-        else:
-            print("[工具呼叫] 無（LLM 直接回答）")
-        answer = result["messages"][-1].content
+        result = graph.invoke(_initial_state(user_input))
+        answer = result.get("generation") or ""
+        if not answer:
+            msgs = result.get("messages", [])
+            answer = msgs[-1].content if msgs else "（無回應）"
         print(f"\nAgent: {answer}\n")
 
 
@@ -77,18 +90,14 @@ def main() -> None:
     load_dotenv()
     api_key = os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY")
 
-    chunk_builder, law_graph = _load_graph(api_key)
+    chunk_builder, law_graph = _load_deps(api_key)
     _check_chunks(chunk_builder)
 
     llm = ChatGoogleGenerativeAI(
-        model="gemini-3.5-flash",
+        model="gemini-2.0-flash",
         google_api_key=api_key,
     )
-    tools = (
-        make_law_tools(chunk_builder, law_graph)
-        + make_judgment_tools()
-    )
-    graph = build_graph(llm, tools)
+    graph = build_graph(llm, chunk_builder, law_graph)
     _chat_loop(graph)
 
 

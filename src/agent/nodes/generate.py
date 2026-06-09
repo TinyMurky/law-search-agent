@@ -1,0 +1,204 @@
+from __future__ import annotations
+
+from collections.abc import Callable
+from typing import Literal
+
+from langchain_core.messages import AIMessage
+from langchain_core.output_parsers import JsonOutputParser, StrOutputParser
+from langchain_core.prompts import ChatPromptTemplate
+from langchain_google_genai import ChatGoogleGenerativeAI
+from pydantic import BaseModel, Field
+
+from agent.state import AgenticRAGState
+
+
+# ── Pydantic schemas ──────────────────────────────────────────────────
+
+class HallucinationResult(BaseModel):
+    score: Literal["yes", "no"] = Field(
+        description="答案是否完全根據文件（yes=有根據，no=有幻覺）"
+    )
+    reason: str = Field(description="一句話說明判斷依據")
+
+
+class AnswerResult(BaseModel):
+    score: Literal["yes", "no"] = Field(
+        description="答案是否真正回答了問題（yes=有回答，no=未完整）"
+    )
+    missing: str = Field(
+        description="缺少什麼資訊（若有回答則填 none）"
+    )
+
+
+# ── Prompts ───────────────────────────────────────────────────────────
+
+_GENERATE_SYSTEM = """\
+你是一位專業的法律資訊助理。
+只根據以下法律條文回答問題，找不到相關資訊請明確說明，不要自行推測。
+
+條文內容：
+{context}"""
+
+_REGENERATE_SYSTEM = """\
+你是一位專業的法律資訊助理。
+前次回答與條文內容有不一致之處，請重新根據以下條文嚴格回答，
+不要加入條文以外的任何資訊。
+
+條文內容：
+{context}"""
+
+_HALLUCINATION_SYSTEM = """\
+你是一個法律答案查核員。
+判斷給定的「答案」是否完全根據「條文內容」，\
+不包含任何條文以外的資訊。
+
+評分規則：
+- "yes"：答案內容完全可在條文中找到依據
+- "no" ：答案包含條文以外的推測或虛構資訊
+
+{format_instructions}
+只輸出 JSON，不要其他文字。"""
+
+_ANSWER_SYSTEM = """\
+你是一個法律答案品質評估員。
+判斷給定的「答案」是否真正回答了「問題」。
+
+評分規則：
+- "yes"：答案確實回答了問題的核心
+- "no" ：答案沒有回答問題，或嚴重缺少關鍵資訊
+
+{format_instructions}
+只輸出 JSON，不要其他文字。"""
+
+
+# ── Chain builders ────────────────────────────────────────────────────
+
+def _make_generate_chain(  # type: ignore[no-untyped-def]
+    llm: ChatGoogleGenerativeAI,
+    system_prompt: str,
+):
+    prompt = ChatPromptTemplate.from_messages([
+        ("system", system_prompt),
+        ("human", "{question}"),
+    ])
+    return prompt | llm | StrOutputParser()
+
+
+def _make_hallucination_grader_chain(  # type: ignore[no-untyped-def]
+    llm: ChatGoogleGenerativeAI,
+):
+    parser = JsonOutputParser(pydantic_object=HallucinationResult)
+    prompt = ChatPromptTemplate.from_messages([
+        ("system", _HALLUCINATION_SYSTEM),
+        ("human", "條文內容：{documents}\n\n答案：{generation}"),
+    ])
+    return (
+        prompt.partial(
+            format_instructions=parser.get_format_instructions()
+        )
+        | llm
+        | parser
+    )
+
+
+def _make_answer_grader_chain(  # type: ignore[no-untyped-def]
+    llm: ChatGoogleGenerativeAI,
+):
+    parser = JsonOutputParser(pydantic_object=AnswerResult)
+    prompt = ChatPromptTemplate.from_messages([
+        ("system", _ANSWER_SYSTEM),
+        ("human", "問題：{question}\n\n答案：{generation}"),
+    ])
+    return (
+        prompt.partial(
+            format_instructions=parser.get_format_instructions()
+        )
+        | llm
+        | parser
+    )
+
+
+# ── Routing ───────────────────────────────────────────────────────────
+
+def route_after_generate(state: AgenticRAGState) -> str:
+    """generate 後的路由，供 LangGraph conditional edge 使用。"""
+    hallucination_passed = state["hallucination_passed"]
+    answer_passed = state["answer_passed"]
+    regenerate_count = state["regenerate_count"]
+    max_regenerates = state["max_regenerates"]
+
+    if not hallucination_passed:
+        if regenerate_count < max_regenerates:
+            return "regenerate"
+        return "rewrite_query"
+    if not answer_passed:
+        return "rewrite_query"
+    return "finish"
+
+
+# ── Node factory ──────────────────────────────────────────────────────
+
+def make_generate_node(
+    llm: ChatGoogleGenerativeAI,
+) -> Callable[[AgenticRAGState], dict[str, object]]:
+    """建立 generate 節點，注入 LLM 依賴。"""
+    generate_chain = _make_generate_chain(llm, _GENERATE_SYSTEM)
+    regenerate_chain = _make_generate_chain(llm, _REGENERATE_SYSTEM)
+    hallucination_grader = _make_hallucination_grader_chain(llm)
+    answer_grader = _make_answer_grader_chain(llm)
+
+    def generate_node(
+        state: AgenticRAGState,
+    ) -> dict[str, object]:
+        question = state["question"]
+        context = "\n---\n".join(
+            doc.page_content for doc in state["documents"]
+        )
+
+        # 上次幻覺失敗才算 regenerate
+        is_regenerate = not state["hallucination_passed"]
+        regenerate_count = state["regenerate_count"]
+        if is_regenerate:
+            regenerate_count += 1
+
+        chain = regenerate_chain if is_regenerate else generate_chain
+        generation: str = chain.invoke(
+            {"context": context, "question": question}
+        )
+        print(f"[generate] 生成完成（{len(generation)} 字）")
+
+        # 幻覺 grader
+        hall_result: dict[str, object] = hallucination_grader.invoke({
+            "documents": context,
+            "generation": generation,
+        })
+        hallucination_passed = hall_result["score"] == "yes"
+        print(
+            f"[generate] 幻覺檢查："
+            f"{'✓' if hallucination_passed else '✗'} "
+            f"— {str(hall_result['reason'])[:60]}"
+        )
+
+        # answer grader（短路：幻覺不過就不跑，answer_passed 預設 True）
+        answer_passed = True
+        if hallucination_passed:
+            ans_result: dict[str, object] = answer_grader.invoke({
+                "question": question,
+                "generation": generation,
+            })
+            answer_passed = ans_result["score"] == "yes"
+            print(
+                f"[generate] 回答品質："
+                f"{'✓' if answer_passed else '✗'} "
+                f"— {str(ans_result['missing'])[:60]}"
+            )
+
+        return {
+            "generation": generation,
+            "hallucination_passed": hallucination_passed,
+            "answer_passed": answer_passed,
+            "regenerate_count": regenerate_count,
+            "messages": [AIMessage(content=generation)],
+        }
+
+    return generate_node

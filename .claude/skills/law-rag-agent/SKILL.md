@@ -118,14 +118,19 @@ class AgenticRAGState(TypedDict):
     # retrieve 的輸出（每次 rewrite 時重置）
     documents: list[Document]
 
+    # grade_documents 的輸出
+    grade_passed: bool  # len(documents) > 0，由 grade_documents_node 計算並寫入
+
     # generate 的輸出
     generation: str
+    hallucination_passed: bool  # 答案是否根據文件（幻覺 grader）
+    answer_passed: bool         # 答案是否回答了問題（answer grader）
 
     # 流程控制
-    retry_count: int       # rewrite_query 次數，上限 max_retries
-    max_retries: int       # 預設 3，Graph 初始化時設定
-    regenerate_count: int  # regenerate self-loop 次數，上限 max_regenerates
-    max_regenerates: int   # 預設 2，防止無限重生成
+    rewrite_count: int       # rewrite_query 次數，上限 max_rewrites
+    max_rewrites: int        # 預設 3，Graph 初始化時設定
+    regenerate_count: int    # regenerate self-loop 次數，上限 max_regenerates
+    max_regenerates: int     # 預設 2，防止無限重生成
 
     # 終止原因
     halt_reason: str
@@ -239,13 +244,16 @@ class StrategyConfig(TypedDict):
 ### grade_documents 之後
 
 ```
-filtered_docs 非空                                → "generate"
-filtered_docs 為空 且 retry_count < max_retries   → "rewrite_query"
-filtered_docs 為空 且 retry_count >= max_retries  → "force_end"
+grade_passed=True                                           → "generate"
+grade_passed=False 且 rewrite_count < max_rewrites          → "rewrite_query"
+grade_passed=False 且 rewrite_count >= max_rewrites         → "force_end"
 ```
 
 **設計決策**：threshold 為 0（完全無相關文件才 rewrite），
 不設最低篇數，結果不佳時再調整。
+
+`grade_passed` 由 `grade_documents_node` 計算（`len(relevant_docs) > 0`）
+並存入 state，讓 routing function 直接讀取而不重複計算。
 
 路由函式 `route_after_grade(state)` 實作在 `grade_documents.py`，
 直接作為 LangGraph conditional edge 的 routing function 傳入。
@@ -263,12 +271,29 @@ metadata strategy 相同，registry 都標記 `requires_grading=True`，一視�
 ### generate 之後
 
 ```
-幻覺 grader 通過 且 answer grader 通過             → "finish"
-幻覺 grader 不通過                                → "regenerate"
-answer grader 不通過 或 regenerate 達上限          → "rewrite_query"
+hallucination_passed=False 且 regenerate_count < max_regenerates  → "regenerate"
+hallucination_passed=False 且 regenerate_count >= max_regenerates → "rewrite_query"
+answer_passed=False                                                → "rewrite_query"
+兩個都通過                                                          → "finish"
 ```
 
-> **⚠️ TBD：** 幻覺 grader 與 answer grader 是否拆成獨立節點待確認。
+路由函式 `route_after_generate(state)` 實作在 `generate.py`，
+直接讀 `hallucination_passed`、`answer_passed`、`regenerate_count` 三個 state 欄位。
+
+**設計決策：grader 合併在 generate node**
+- 幻覺不通過時短路，不跑 answer grader（省一次 LLM）
+- 兩個 grader 都是「對這次 generation 的品質評估」，職責同源
+- 與 `grade_documents` 風格一致（品質判斷邏輯內聚在單一 node）
+
+**regenerate_count 遞增機制**
+- `generate_node` 在函式開頭讀 `state.get("hallucination_passed", True)`
+- 若為 `False`（上次幻覺失敗），則 `regenerate_count + 1`，並切換至 `_REGENERATE_SYSTEM` prompt
+- `rewrite_query_node` 重置 `regenerate_count=0` 和 `hallucination_passed=True`（換搜尋方向後重新計算）
+
+**無限 loop 防護**
+- regenerate loop：`regenerate_count < max_regenerates` → 超過走 rewrite_query
+- rewrite loop：`rewrite_count < max_rewrites` → 超過走 force_end（grade_documents routing）
+- 最壞情況：`max_rewrites × (max_regenerates + 1)` 次 generate，保證終止
 
 ---
 
@@ -281,9 +306,9 @@ answer grader 不通過 或 regenerate 達上限          → "rewrite_query"
 | `login_node` | 取得司法院 API token（placeholder）| — | `judgment_api_token` |
 | `analyze_query` | 分類 intent，生成 SubQuery 清單 | `question` | `intent`, `complexity`, `rewritten_queries` |
 | `retrieve` | 依 strategy 搜尋，重置 documents | `rewritten_queries` | `documents` |
-| `grade_documents` | LLM 逐篇相關性判斷，過濾不相關文件 | `question`, `documents` | `documents`（過濾後）|
-| `generate` | 生成答案，執行 grader 路由 | `question`, `documents` | `generation` |
-| `rewrite_query` | 改寫查詢，更新 retry_count | `question`, `generation` | `rewritten_queries`, `retry_count` |
+| `grade_documents` | LLM 逐篇相關性判斷，過濾不相關文件 | `question`, `documents` | `documents`（過濾後）, `grade_passed` |
+| `generate` | 生成答案，執行幻覺 grader + answer grader | `question`, `documents` | `generation`, `hallucination_passed`, `answer_passed`, `regenerate_count` |
+| `rewrite_query` | 改寫查詢，更新 rewrite_count，重置 regenerate 狀態 | `question` | `rewritten_queries`, `rewrite_count`, `documents`, `regenerate_count`, `hallucination_passed` |
 | `force_end` | 達到上限，回傳查無結果說明 | `halt_reason` | `generation` |
 
 ---
@@ -300,7 +325,7 @@ src/agent/
       ├── analyze_query.py    # ✅ 完成
       ├── retrieve.py         # ✅ 完成
       ├── grade_documents.py  # ✅ 完成
-      ├── generate.py         # ⚠️ TBD
+      ├── generate.py         # ✅ 完成
       ├── rewrite_query.py    # ✅ 完成
       └── force_end.py        # ✅ 完成
 ```

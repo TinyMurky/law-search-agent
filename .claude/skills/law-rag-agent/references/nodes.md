@@ -631,21 +631,249 @@ def make_grade_documents_node(
 ### 職責
 
 用 `question` 和 `documents` 生成答案，
-執行幻覺 grader 和 answer grader 決定路由。
+執行幻覺 grader 和 answer grader，將結果存入 state 供路由使用。
 
-> **⚠️ TBD：** 完整程式碼待實作。grader 是否拆成獨立節點待確認。
+### Pydantic schema
 
-### 幻覺 grader
+```python
+class HallucinationResult(BaseModel):
+    score: Literal["yes", "no"]  # yes = 有根據（通過）
+    reason: str
 
-判斷 `generation` 是否有根據於 `documents`。
-- 通過 → answer grader
-- 不通過 → "regenerate"（`regenerate_count` +1，達上限改走 "rewrite_query"）
+class AnswerResult(BaseModel):
+    score: Literal["yes", "no"]  # yes = 有回答問題（通過）
+    missing: str                  # 缺少什麼（通過時填 "none"）
+```
 
-### answer grader
+### 關鍵設計決策
 
-判斷 `generation` 是否真正回答了 `question`。
-- 通過 → "finish"
-- 不通過 → "rewrite_query"
+- **grader 合併在同一 node**：幻覺不通過時短路（不跑 answer grader），省一次 LLM；與 `grade_documents` 風格一致
+- **regenerate_count 在 node 開頭遞增**：讀 `state.get("hallucination_passed", True)`；若為 `False` 代表上次幻覺失敗，+1 並切換 `_REGENERATE_SYSTEM` prompt
+- **routing function 讀 state**：`route_after_generate` 是純函式，讀 `hallucination_passed`、`answer_passed`、`regenerate_count` vs `max_regenerates`
+- **rewrite_query 重置**：換搜尋方向時 `regenerate_count=0` 且 `hallucination_passed=True`，確保下一輪 generate 不誤判為 regenerate
+
+### 路由函式
+
+```python
+def route_after_generate(state: AgenticRAGState) -> str:
+    hallucination_passed = state.get("hallucination_passed", True)
+    answer_passed = state.get("answer_passed", True)
+    regenerate_count = state["regenerate_count"]
+    max_regenerates = state["max_regenerates"]
+
+    if not hallucination_passed:
+        if regenerate_count < max_regenerates:
+            return "regenerate"
+        return "rewrite_query"
+    if not answer_passed:
+        return "rewrite_query"
+    return "finish"
+```
+
+### 完整程式碼
+
+```python
+# src/agent/nodes/generate.py
+from __future__ import annotations
+
+from collections.abc import Callable
+from typing import Literal
+
+from langchain_core.messages import AIMessage
+from langchain_core.output_parsers import JsonOutputParser, StrOutputParser
+from langchain_core.prompts import ChatPromptTemplate
+from langchain_google_genai import ChatGoogleGenerativeAI
+from pydantic import BaseModel, Field
+
+from agent.state import AgenticRAGState
+
+
+class HallucinationResult(BaseModel):
+    score: Literal["yes", "no"] = Field(
+        description="答案是否完全根據文件（yes=有根據，no=有幻覺）"
+    )
+    reason: str = Field(description="一句話說明判斷依據")
+
+
+class AnswerResult(BaseModel):
+    score: Literal["yes", "no"] = Field(
+        description="答案是否真正回答了問題（yes=有回答，no=未完整回答）"
+    )
+    missing: str = Field(
+        description="缺少什麼資訊（若有回答則填 none）"
+    )
+
+
+_GENERATE_SYSTEM = """\
+你是一位專業的法律資訊助理。
+只根據以下法律條文回答問題，找不到相關資訊請明確說明，不要自行推測。
+
+條文內容：
+{context}"""
+
+_REGENERATE_SYSTEM = """\
+你是一位專業的法律資訊助理。
+前次回答與條文內容有不一致之處，請重新根據以下條文嚴格回答，
+不要加入條文以外的任何資訊。
+
+條文內容：
+{context}"""
+
+_HALLUCINATION_SYSTEM = """\
+你是一個法律答案查核員。
+判斷給定的「答案」是否完全根據「條文內容」，不包含任何條文以外的資訊。
+
+評分規則：
+- "yes"：答案內容完全可在條文中找到依據
+- "no" ：答案包含條文以外的推測或虛構資訊
+
+{format_instructions}
+只輸出 JSON，不要其他文字。"""
+
+_ANSWER_SYSTEM = """\
+你是一個法律答案品質評估員。
+判斷給定的「答案」是否真正回答了「問題」。
+
+評分規則：
+- "yes"：答案確實回答了問題的核心
+- "no" ：答案沒有回答問題，或嚴重缺少關鍵資訊
+
+{format_instructions}
+只輸出 JSON，不要其他文字。"""
+
+
+def _make_generate_chain(  # type: ignore[no-untyped-def]
+    llm: ChatGoogleGenerativeAI,
+    system_prompt: str,
+):
+    prompt = ChatPromptTemplate.from_messages([
+        ("system", system_prompt),
+        ("human", "{question}"),
+    ])
+    return prompt | llm | StrOutputParser()
+
+
+def _make_hallucination_grader_chain(  # type: ignore[no-untyped-def]
+    llm: ChatGoogleGenerativeAI,
+):
+    parser = JsonOutputParser(pydantic_object=HallucinationResult)
+    prompt = ChatPromptTemplate.from_messages([
+        ("system", _HALLUCINATION_SYSTEM),
+        ("human", "條文內容：{documents}\n\n答案：{generation}"),
+    ])
+    return (
+        prompt.partial(
+            format_instructions=parser.get_format_instructions()
+        )
+        | llm
+        | parser
+    )
+
+
+def _make_answer_grader_chain(  # type: ignore[no-untyped-def]
+    llm: ChatGoogleGenerativeAI,
+):
+    parser = JsonOutputParser(pydantic_object=AnswerResult)
+    prompt = ChatPromptTemplate.from_messages([
+        ("system", _ANSWER_SYSTEM),
+        ("human", "問題：{question}\n\n答案：{generation}"),
+    ])
+    return (
+        prompt.partial(
+            format_instructions=parser.get_format_instructions()
+        )
+        | llm
+        | parser
+    )
+
+
+def route_after_generate(state: AgenticRAGState) -> str:
+    """generate 後的路由，供 LangGraph conditional edge 使用。"""
+    hallucination_passed = state.get(  # type: ignore[call-overload]
+        "hallucination_passed", True
+    )
+    answer_passed = state.get(  # type: ignore[call-overload]
+        "answer_passed", True
+    )
+    regenerate_count = state["regenerate_count"]
+    max_regenerates = state["max_regenerates"]
+
+    if not hallucination_passed:
+        if regenerate_count < max_regenerates:
+            return "regenerate"
+        return "rewrite_query"
+    if not answer_passed:
+        return "rewrite_query"
+    return "finish"
+
+
+def make_generate_node(
+    llm: ChatGoogleGenerativeAI,
+) -> Callable[[AgenticRAGState], dict[str, object]]:
+    """建立 generate 節點，注入 LLM 依賴。"""
+    generate_chain = _make_generate_chain(llm, _GENERATE_SYSTEM)
+    regenerate_chain = _make_generate_chain(llm, _REGENERATE_SYSTEM)
+    hallucination_grader = _make_hallucination_grader_chain(llm)
+    answer_grader = _make_answer_grader_chain(llm)
+
+    def generate_node(
+        state: AgenticRAGState,
+    ) -> dict[str, object]:
+        question = state["question"]
+        context = "\n---\n".join(
+            doc.page_content for doc in state["documents"]
+        )
+
+        # 上次幻覺失敗才算 regenerate，初次呼叫 default True
+        is_regenerate = not state.get(  # type: ignore[call-overload]
+            "hallucination_passed", True
+        )
+        regenerate_count = state["regenerate_count"]
+        if is_regenerate:
+            regenerate_count += 1
+
+        chain = regenerate_chain if is_regenerate else generate_chain
+        generation: str = chain.invoke(
+            {"context": context, "question": question}
+        )
+        print(f"[generate] 生成完成（{len(generation)} 字）")
+
+        # 幻覺 grader
+        hall_result: dict[str, object] = hallucination_grader.invoke({
+            "documents": context,
+            "generation": generation,
+        })
+        hallucination_passed = hall_result["score"] == "yes"
+        print(
+            f"[generate] 幻覺檢查："
+            f"{'✓' if hallucination_passed else '✗'} "
+            f"— {str(hall_result['reason'])[:60]}"
+        )
+
+        # answer grader（短路：幻覺不過就不跑，answer_passed 預設 True）
+        answer_passed = True
+        if hallucination_passed:
+            ans_result: dict[str, object] = answer_grader.invoke({
+                "question": question,
+                "generation": generation,
+            })
+            answer_passed = ans_result["score"] == "yes"
+            print(
+                f"[generate] 回答品質："
+                f"{'✓' if answer_passed else '✗'} "
+                f"— {str(ans_result['missing'])[:60]}"
+            )
+
+        return {
+            "generation": generation,
+            "hallucination_passed": hallucination_passed,
+            "answer_passed": answer_passed,
+            "regenerate_count": regenerate_count,
+            "messages": [AIMessage(content=generation)],
+        }
+
+    return generate_node
+```
 
 ---
 
@@ -653,8 +881,8 @@ def make_grade_documents_node(
 
 ### 職責
 
-前一次搜尋無相關文件，從不同角度改寫查詢，清空 documents，
-`retry_count` +1，準備重新進入 retrieve。
+前一次搜尋無相關文件（或 generate 品質不足），從不同角度改寫查詢，
+清空 documents，`rewrite_count` +1，準備重新進入 retrieve。
 
 ### 關鍵設計決策
 
@@ -663,6 +891,8 @@ def make_grade_documents_node(
   是最通用的 fallback。未來若需依 intent 選擇策略，
   可查詢 `STRATEGY_REGISTRY`（見 SKILL.md）
 - **清空 `documents`**：避免舊查詢的不相關文件污染後續 generate
+- **重置 regenerate 狀態**：回傳 `regenerate_count=0`、`hallucination_passed=True`，
+  確保下一輪進入 generate 時不誤判為 regenerate
 
 ### 完整程式碼
 
@@ -699,7 +929,7 @@ def make_rewrite_query_node(
         new_query: str = rewrite_chain.invoke(
             {"question": state["question"]}
         )
-        new_retry_count = state["retry_count"] + 1
+        new_rewrite_count = state["rewrite_count"] + 1
         return {
             "rewritten_queries": [SubQuery(
                 query=new_query,
@@ -707,8 +937,10 @@ def make_rewrite_query_node(
                 law_name=None,
                 article_no=None,
             )],
-            "retry_count": new_retry_count,
+            "rewrite_count": new_rewrite_count,
             "documents": [],
+            "regenerate_count": 0,
+            "hallucination_passed": True,
         }
 
     return rewrite_query_node

@@ -31,12 +31,17 @@ class AgenticRAGState(TypedDict):
     # retrieve 的輸出（每次 rewrite 時重置）
     documents: list[Document]
 
+    # grade_documents 的輸出
+    grade_passed: bool
+
     # generate 的輸出
     generation: str
+    hallucination_passed: bool
+    answer_passed: bool
 
     # 流程控制
-    retry_count: int
-    max_retries: int
+    rewrite_count: int
+    max_rewrites: int
     regenerate_count: int
     max_regenerates: int
 
