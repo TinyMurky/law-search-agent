@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from collections.abc import Callable
 from typing import cast
 
@@ -12,6 +13,12 @@ from ingestion.law_vector.chunk_builder import ChunkBuilder
 
 _SEARCH_K = 5
 _EXPAND_K = 3
+
+
+def _normalize_article_no(raw: str) -> str:
+    """第184條 / 第184条 → 第 184 條（符合圖裡的 node_id 格式）"""
+    s = re.sub(r"\s+", "", raw)
+    return re.sub(r"^第(\d+)[條条]$", r"第 \1 條", s)
 
 
 # ── Document 轉換 ─────────────────────────────────────────────────────
@@ -84,9 +91,14 @@ def make_retrieve_node(
             print(f"[retrieve] strategy={strategy}")
 
             if strategy in ("law:semantic", "law:hyde"):
-                for r in chunk_builder.search(
-                    sub["query"], k=_SEARCH_K
-                ):
+                try:
+                    results = chunk_builder.search(
+                        sub["query"], k=_SEARCH_K
+                    )
+                except Exception as e:
+                    print(f"[retrieve] embedding 錯誤，跳過：{e}")
+                    continue
+                for r in results:
                     _add(_search_result_to_doc(r, strategy))
 
             elif strategy == "law:direct_lookup":
@@ -99,7 +111,10 @@ def make_retrieve_node(
                         f"{sub['law_name']}"
                     )
                     continue
-                node_id = f"{pcode}#{sub['article_no']}"
+                article_no = _normalize_article_no(
+                    sub["article_no"] or ""
+                )
+                node_id = f"{pcode}#{article_no}"
                 node = law_graph.get_node(node_id)
                 if node is None or node["type"] != "article":
                     print(f"[retrieve] 找不到條文：{node_id}")
@@ -111,9 +126,13 @@ def make_retrieve_node(
                 ))
 
             elif strategy == "law:graph_expand":
-                results = chunk_builder.search(
-                    sub["query"], k=_SEARCH_K
-                )
+                try:
+                    results = chunk_builder.search(
+                        sub["query"], k=_SEARCH_K
+                    )
+                except Exception as e:
+                    print(f"[retrieve] embedding 錯誤，跳過：{e}")
+                    continue
                 for r in results:
                     _add(_search_result_to_doc(r, strategy))
                     node_id_str = cast(str, r["node_id"])

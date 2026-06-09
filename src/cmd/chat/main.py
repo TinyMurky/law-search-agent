@@ -94,7 +94,7 @@ def main() -> None:
     _check_chunks(chunk_builder)
 
     llm = ChatGoogleGenerativeAI(
-        model="gemini-2.0-flash",
+        model="gemini-2.5-flash",
         google_api_key=api_key,
     )
     graph = build_graph(llm, chunk_builder, law_graph)

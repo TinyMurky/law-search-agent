@@ -11,7 +11,7 @@ from agent.state import AgenticRAGState, SubQuery
 _REWRITE_SYSTEM = """\
 前一次搜尋沒有找到足夠的相關法律資訊。
 請從完全不同的角度改寫這個問題，嘗試使用不同的術語或關鍵字。
-直接輸出改寫後的查詢，不要說明。"""
+只輸出一條改寫後的查詢，不要輸出多條，不要說明，不要編號。"""
 
 
 def _make_rewrite_chain(  # type: ignore[no-untyped-def]
