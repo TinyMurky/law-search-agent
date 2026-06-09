@@ -3,17 +3,16 @@ import sys
 
 from dotenv import load_dotenv
 from langchain_core.messages import HumanMessage
-from langchain_google_genai import ChatGoogleGenerativeAI
-from langchain_google_genai import GoogleGenerativeAIEmbeddings
+from langchain_google_genai import (ChatGoogleGenerativeAI,
+                                    GoogleGenerativeAIEmbeddings)
 from langgraph.graph.state import CompiledStateGraph
 
+from agent.graph import build_graph
 from ingestion.law_graph.builder import LawGraphBuilder
 from ingestion.law_graph.nx_law_graph import NxLawGraph
 from ingestion.law_ingestion.citation_extractor import CitationExtractor
 from ingestion.law_ingestion.law_reader import LawReader
 from ingestion.law_vector.chunk_builder import ChunkBuilder
-
-from agent.graph import build_graph
 
 _RAW_DATA = "raw_data/laws/ChLaw.json"
 _CHROMA_DIR = "data/chroma_db"
@@ -94,7 +93,7 @@ def main() -> None:
     _check_chunks(chunk_builder)
 
     llm = ChatGoogleGenerativeAI(
-        model="gemini-2.5-flash",
+        model="gemini-3.5-flash",
         google_api_key=api_key,
     )
     graph = build_graph(llm, chunk_builder, law_graph)
