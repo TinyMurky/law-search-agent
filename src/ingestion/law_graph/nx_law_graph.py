@@ -66,13 +66,60 @@ class NxLawGraph:
     def get_node(
         self, node_id: str
     ) -> LawNodeAttrs | ArticleNodeAttrs | None:
-        """以 node_id 取出節點屬性，不存在回傳 None。"""
+        """以 node_id 取出節點屬性，不存在回傳 None。
+
+        Args:
+            node_id (str): 節點 ID，Law 為 pcode，
+                Article 為 "{pcode}#{article_no}"。
+
+        Returns:
+            LawNodeAttrs | ArticleNodeAttrs | None:
+                節點屬性，節點不存在時回傳 None。
+        """
         if node_id not in self._G:
             return None
         raw = self._G.nodes[node_id]
         if raw.get("type") == "law":
             return cast(LawNodeAttrs, raw)
         return cast(ArticleNodeAttrs, raw)
+
+    def get_law(self, pcode: str) -> LawNodeAttrs | None:
+        """以 pcode 取出法律節點屬性。
+
+        底層呼叫 get_node，確認 type="law" 後回傳正確型別。
+
+        Args:
+            pcode (str): 法律唯一識別碼，例如 "B0000001"。
+
+        Returns:
+            LawNodeAttrs | None: 法律節點屬性，不存在時回傳 None。
+        """
+        node = self.get_node(pcode)
+        if node is None or node["type"] != "law":
+            return None
+        return cast(LawNodeAttrs, node)
+
+    def get_article(
+        self, pcode: str, article_no: str
+    ) -> tuple[str, ArticleNodeAttrs] | None:
+        """以 pcode 與 article_no 取出條文節點 ID 與屬性。
+
+        底層呼叫 get_node，確認 type="article" 後回傳
+        (node_id, attrs) tuple，讓呼叫端不必自行組合 node_id。
+
+        Args:
+            pcode (str): 所屬法律 pcode，例如 "B0000001"。
+            article_no (str): 條號，例如 "第 184 條"。
+
+        Returns:
+            tuple[str, ArticleNodeAttrs] | None:
+                (node_id, 條文節點屬性)，不存在時回傳 None。
+        """
+        node_id = f"{pcode}#{article_no}"
+        node = self.get_node(node_id)
+        if node is None or node["type"] != "article":
+            return None
+        return node_id, cast(ArticleNodeAttrs, node)
 
     def get_edge(
         self, u: str, v: str

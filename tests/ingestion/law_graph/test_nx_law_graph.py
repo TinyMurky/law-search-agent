@@ -189,6 +189,65 @@ def test_get_node_not_found_returns_none(
     assert graph_with_attrs.get_node("X0000000") is None
 
 
+# --- get_law ---
+
+def test_get_law_returns_law_attrs(
+    graph_with_attrs: NxLawGraph,
+) -> None:
+    result = graph_with_attrs.get_law("B0000001")
+    assert result is not None
+    assert result["type"] == "law"
+    assert result["law_name"] == "民法"
+
+
+def test_get_law_not_found_returns_none(
+    graph_with_attrs: NxLawGraph,
+) -> None:
+    assert graph_with_attrs.get_law("X0000000") is None
+
+
+def test_get_law_returns_none_for_article_node(
+    graph_with_attrs: NxLawGraph,
+) -> None:
+    # 傳入條文節點 ID，type != "law"，應回傳 None
+    assert graph_with_attrs.get_law("B0000001#第 184 條") is None
+
+
+# --- get_article ---
+
+def test_get_article_returns_tuple(
+    graph_with_attrs: NxLawGraph,
+) -> None:
+    result = graph_with_attrs.get_article("B0000001", "第 184 條")
+    assert result is not None
+    node_id, attrs = result
+    assert node_id == "B0000001#第 184 條"
+    assert attrs["type"] == "article"
+    assert attrs["article_no"] == "第 184 條"
+    assert attrs["pcode"] == "B0000001"
+
+
+def test_get_article_node_id_format(
+    graph_with_attrs: NxLawGraph,
+) -> None:
+    result = graph_with_attrs.get_article("B0000001", "第 184 條")
+    assert result is not None
+    node_id, _ = result
+    assert node_id == f"B0000001#第 184 條"
+
+
+def test_get_article_not_found_returns_none(
+    graph_with_attrs: NxLawGraph,
+) -> None:
+    assert graph_with_attrs.get_article("B0000001", "第 9999 條") is None
+
+
+def test_get_article_returns_none_for_law_node(
+    graph_with_attrs: NxLawGraph,
+) -> None:
+    assert graph_with_attrs.get_article("B0000001", "") is None
+
+
 # --- get_edge ---
 
 def test_get_edge_returns_contains_attrs(

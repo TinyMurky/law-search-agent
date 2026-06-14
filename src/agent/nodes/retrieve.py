@@ -14,7 +14,9 @@ from ingestion.law_vector.chunk_builder import ChunkBuilder
 
 # VectorDB 會搜出幾個結果
 _SEARCH_K = 5
-_EXPAND_K = 3
+
+# 法條的引用對象只會拿最前面 k 個
+_EXPAND_K = 10
 
 
 def _normalize_article_no(raw: str) -> str:
@@ -108,21 +110,15 @@ def make_retrieve_node(
             elif strategy == "law:direct_lookup":
                 pcode = law_graph.find_pcode_by_name(sub["law_name"] or "")
                 if pcode is None:
-                    print(f"[retrieve] 找不到 pcode：" f"{sub['law_name']}")
+                    print(f"[retrieve] 找不到 pcode：{sub['law_name']}")
                     continue
                 article_no = _normalize_article_no(sub["article_no"] or "")
-                node_id = f"{pcode}#{article_no}"
-                node = law_graph.get_node(node_id)
-                if node is None or node["type"] != "article":
-                    print(f"[retrieve] 找不到條文：{node_id}")
+                result = law_graph.get_article(pcode, article_no)
+                if result is None:
+                    print(f"[retrieve] 找不到條文：" f"{pcode}#{article_no}")
                     continue
-                _add(
-                    _article_node_to_doc(
-                        node_id,
-                        cast(ArticleNodeAttrs, node),
-                        strategy,
-                    )
-                )
+                node_id, article = result
+                _add(_article_node_to_doc(node_id, article, strategy))
 
             elif strategy == "law:graph_expand":
                 try:

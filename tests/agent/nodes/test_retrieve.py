@@ -88,7 +88,7 @@ def mock_builder() -> MagicMock:
 def mock_graph() -> MagicMock:
     g = MagicMock()
     g.find_pcode_by_name.return_value = None
-    g.get_node.return_value = None
+    g.get_article.return_value = None
     g.get_cited_with_edges.return_value = []
     return g
 
@@ -129,13 +129,16 @@ def test_direct_lookup_found_returns_document(
     mock_builder: MagicMock, mock_graph: MagicMock
 ) -> None:
     mock_graph.find_pcode_by_name.return_value = "B0000001"
-    mock_graph.get_node.return_value = _article_node()
+    mock_graph.get_article.return_value = (
+        "B0000001#第 184 條",
+        _article_node(),
+    )
     node = make_retrieve_node(mock_builder, mock_graph)
     result = node(_state([
         _sub_query("", "law:direct_lookup", "民法", "第 184 條")
     ]))
 
-    mock_graph.get_node.assert_called_once_with("B0000001#第 184 條")
+    mock_graph.get_article.assert_called_once_with("B0000001", "第 184 條")
     docs = result["documents"]
     assert len(docs) == 1
     assert docs[0].metadata["article_no"] == "第 184 條"
@@ -157,7 +160,7 @@ def test_direct_lookup_article_not_found_returns_empty(
     mock_builder: MagicMock, mock_graph: MagicMock
 ) -> None:
     mock_graph.find_pcode_by_name.return_value = "B0000001"
-    mock_graph.get_node.return_value = None
+    mock_graph.get_article.return_value = None
     node = make_retrieve_node(mock_builder, mock_graph)
     result = node(_state([
         _sub_query("", "law:direct_lookup", "民法", "第 9999 條")
@@ -169,20 +172,9 @@ def test_direct_lookup_article_not_found_returns_empty(
 def test_direct_lookup_law_node_skipped(
     mock_builder: MagicMock, mock_graph: MagicMock
 ) -> None:
+    # get_article 內部已過濾 type != "article"，回傳 None 即跳過
     mock_graph.find_pcode_by_name.return_value = "B0000001"
-    mock_graph.get_node.return_value = {
-        "type": "law",
-        "law_name": "民法",
-        "law_level": "法律",
-        "law_category": "民事",
-        "law_effective_date": "",
-        "law_abandon_note": "",
-        "source_pcode": "B0000001",
-        "source_article_no": "",
-        "source_paragraph": "",
-        "law_modified_date": "20210101",
-        "created_at": "2026-05-30T00:00:00+00:00",
-    }
+    mock_graph.get_article.return_value = None
     node = make_retrieve_node(mock_builder, mock_graph)
     result = node(_state([
         _sub_query("", "law:direct_lookup", "民法", "B0000001")
@@ -227,8 +219,8 @@ def test_graph_expand_expand_k_limits_citations(
     node = make_retrieve_node(mock_builder, mock_graph)
     result = node(_state([_sub_query("test", "law:graph_expand")]))
 
-    # 原始 1 筆 + 最多 _EXPAND_K=3 筆引用
-    assert len(result["documents"]) <= 4
+    # 原始 1 筆 + 最多 _EXPAND_K=10 筆引用
+    assert len(result["documents"]) <= 11
 
 
 # ── judgment:tavily（placeholder）────────────────────────────────────
