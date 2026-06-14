@@ -10,12 +10,39 @@
 
 ## 規則
 
-- 每行不超過 **80 字元**（pycodestyle E501）
+- 每行不超過 **79 字元**（pycodestyle E501）
 - mccabe 複雜度上限：**10**
   - 複雜度 = 函式內的分支路徑數（if / for / while / except 各算一條）
   - 超過 10 代表函式邏輯太複雜，需要拆分成更小的函式
 - 所有函式必須有 **return type annotation**（mypy `disallow_untyped_defs`）
 - 避免回傳 `Any`（mypy `warn_return_any`）
+- 每次寫完程式碼都要執行 `make lint` 與 `make type-check` 與 `make test`, 並修理到沒有錯誤
+- 缺少的測試需要補齊
+
+## Docstring 格式
+
+所有 class、method、function 需使用以下格式：
+
+```python
+def func(width: float, height: float) -> float:
+    """計算矩形的面積。
+
+    此函式會根據傳入的寬度與高度，計算並回傳其面積。
+
+    Args:
+        width (float): 矩形的寬度。
+        height (float): 矩形的高度。
+
+    Returns:
+        float: 計算出來的矩形面積。
+    """
+```
+
+- 第一行：一句話說明函式做什麼（動詞開頭）
+- 第二段（可選）：補充說明邏輯、注意事項或格式約定
+- `Args`：每個參數一行，格式為 `name (type): 說明`
+- `Returns`：格式為 `type: 說明`
+- 無參數或回傳 `None` 時省略對應區塊
 
 ## mypy 特殊情況
 
