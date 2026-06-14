@@ -28,6 +28,6 @@ class Article(BaseModel):
     """條文內容"""
 
     cited_articles: list[tuple[str, CitationType]] = Field(
-        default_factory=list
+        default_factory=list,
     )
     """本條文引用的其他條文，格式為 (「{pcode}#{條號}」, CitationType)"""
