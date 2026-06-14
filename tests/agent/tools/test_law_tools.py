@@ -3,19 +3,21 @@ from unittest.mock import MagicMock
 import pytest
 
 from agent.tools.law import make_law_tools
+from ingestion.law_vector.article_chunk import ArticleChunk
 
 
 @pytest.fixture
 def mock_builder() -> MagicMock:
     builder = MagicMock()
-    builder.search.return_value = [
-        {
-            "node_id": "B0000001#第 184 條",
-            "law_name": "民法",
-            "article_no": "第 184 條",
-            "content": "因故意或過失，不法侵害他人之權利者，負損害賠償責任。",
-            "score": 0.9,
-        }
+    builder.search_chunks.return_value = [
+        ArticleChunk(
+            pcode="B0000001",
+            law_name="民法",
+            article_no="第 184 條",
+            artical_content="因故意或過失，不法侵害他人之權利者，負損害賠償責任。",
+            law_modified_date="20240101",
+            score=0.9,
+        )
     ]
     return builder
 
@@ -74,7 +76,7 @@ def test_search_law_articles_formats_results(
 def test_search_law_articles_empty_returns_message(
     mock_builder: MagicMock, mock_graph: MagicMock
 ) -> None:
-    mock_builder.search.return_value = []
+    mock_builder.search_chunks.return_value = []
     tools = make_law_tools(mock_builder, mock_graph)
     search = next(t for t in tools if t.name == "search_law_articles")
     result = search.invoke({"query": "不存在的查詢"})
@@ -84,21 +86,23 @@ def test_search_law_articles_empty_returns_message(
 def test_search_law_articles_multiple_results_separated(
     mock_builder: MagicMock, mock_graph: MagicMock
 ) -> None:
-    mock_builder.search.return_value = [
-        {
-            "node_id": "B0000001#第 184 條",
-            "law_name": "民法",
-            "article_no": "第 184 條",
-            "content": "內容A",
-            "score": 0.9,
-        },
-        {
-            "node_id": "B0000001#第 185 條",
-            "law_name": "民法",
-            "article_no": "第 185 條",
-            "content": "內容B",
-            "score": 0.8,
-        },
+    mock_builder.search_chunks.return_value = [
+        ArticleChunk(
+            pcode="B0000001",
+            law_name="民法",
+            article_no="第 184 條",
+            artical_content="內容A",
+            law_modified_date="20240101",
+            score=0.9,
+        ),
+        ArticleChunk(
+            pcode="B0000001",
+            law_name="民法",
+            article_no="第 185 條",
+            artical_content="內容B",
+            law_modified_date="20240101",
+            score=0.8,
+        ),
     ]
     tools = make_law_tools(mock_builder, mock_graph)
     search = next(t for t in tools if t.name == "search_law_articles")

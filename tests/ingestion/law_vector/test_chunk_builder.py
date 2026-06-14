@@ -4,6 +4,7 @@ import pytest
 from langchain_core.embeddings import Embeddings
 
 from ingestion.law_ingestion.law import Law
+from ingestion.law_vector.article_chunk import ArticleChunk
 from ingestion.law_vector.chunk_builder import ChunkBuilder
 
 _LAW_URL = (
@@ -127,62 +128,93 @@ def test_clear_resets_count(
     assert builder.count() == 0
 
 
-def test_peek_structure(
+# ── peek_chunks ───────────────────────────────────────────────────────
+
+
+def test_peek_chunks_returns_article_chunk(
     builder: ChunkBuilder, law: Law
 ) -> None:
     builder.build([law])
-    results = builder.peek(2)
-    assert len(results) == 2
-    for r in results:
-        assert "id" in r
-        assert "document" in r
-        assert "metadata" in r
+    results = builder.peek_chunks(2)
+    assert all(isinstance(r, ArticleChunk) for r in results)
 
 
-def test_peek_id_contains_separator(
+def test_peek_chunks_respects_limit(
     builder: ChunkBuilder, law: Law
 ) -> None:
     builder.build([law])
-    results = builder.peek(2)
-    for r in results:
-        assert "#" in str(r["id"])
-
-
-def test_peek_respects_limit(
-    builder: ChunkBuilder, law: Law
-) -> None:
-    builder.build([law])
-    results = builder.peek(1)
+    results = builder.peek_chunks(1)
     assert len(results) == 1
 
 
-def test_search_structure(
+def test_peek_chunks_node_id_format(
     builder: ChunkBuilder, law: Law
 ) -> None:
     builder.build([law])
-    results = builder.search("民法", k=2)
+    results = builder.peek_chunks(2)
+    for chunk in results:
+        assert "#" in chunk.to_node_id()
+
+
+def test_peek_chunks_score_is_none(
+    builder: ChunkBuilder, law: Law
+) -> None:
+    builder.build([law])
+    results = builder.peek_chunks(2)
+    for chunk in results:
+        assert chunk.score is None
+
+
+def test_peek_chunks_law_name(
+    builder: ChunkBuilder, law: Law
+) -> None:
+    builder.build([law])
+    results = builder.peek_chunks(2)
+    for chunk in results:
+        assert chunk.law_name == "民法"
+
+
+# ── search_chunks ─────────────────────────────────────────────────────
+
+
+def test_search_chunks_returns_article_chunk(
+    builder: ChunkBuilder, law: Law
+) -> None:
+    builder.build([law])
+    results = builder.search_chunks("民法", k=2)
+    assert all(isinstance(r, ArticleChunk) for r in results)
+
+
+def test_search_chunks_count(
+    builder: ChunkBuilder, law: Law
+) -> None:
+    builder.build([law])
+    results = builder.search_chunks("民法", k=2)
     assert len(results) == 2
-    for r in results:
-        assert "node_id" in r
-        assert "law_name" in r
-        assert "article_no" in r
-        assert "content" in r
-        assert "score" in r
 
 
-def test_search_node_id_format(
+def test_search_chunks_node_id_format(
     builder: ChunkBuilder, law: Law
 ) -> None:
     builder.build([law])
-    results = builder.search("民法", k=2)
-    for r in results:
-        assert "#" in str(r["node_id"])
+    results = builder.search_chunks("民法", k=2)
+    for chunk in results:
+        assert "#" in chunk.to_node_id()
 
 
-def test_search_law_name_matches(
+def test_search_chunks_law_name(
     builder: ChunkBuilder, law: Law
 ) -> None:
     builder.build([law])
-    results = builder.search("民法", k=2)
-    for r in results:
-        assert r["law_name"] == "民法"
+    results = builder.search_chunks("民法", k=2)
+    for chunk in results:
+        assert chunk.law_name == "民法"
+
+
+def test_search_chunks_has_score(
+    builder: ChunkBuilder, law: Law
+) -> None:
+    builder.build([law])
+    results = builder.search_chunks("民法", k=2)
+    for chunk in results:
+        assert chunk.score is not None

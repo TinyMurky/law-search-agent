@@ -1,76 +1,72 @@
 import time
+from collections.abc import Sequence
 
 from langchain_chroma import Chroma
+from langchain_core.documents import Document
 from langchain_core.embeddings import Embeddings
 from tqdm import tqdm
 
 from ingestion.law_ingestion.law import Law
+from ingestion.law_vector.article_chunk import ArticleChunk
 
 _BATCH_SIZE = 100
 _COLLECTION_NAME = "chunks"
 
 
-def _collect(
-    laws: list[Law],
-) -> tuple[list[str], list[str], list[dict[str, str]]]:
+def _collect(laws: list[Law]) -> list[ArticleChunk]:
+    """從 laws 收集 ArticleType='A' 的條文，轉為 ArticleChunk 清單。
+
+    Args:
+        laws (list[Law]): 已載入的法律清單。
+
+    Returns:
+        list[ArticleChunk]: 所有可 embed 的條文。
     """
-    Collect ArticleType='A' (條文) articles as parallel lists for add_texts().
-    """
-    docs: list[str] = []
-    ids: list[str] = []
-    metas: list[dict[str, str]] = []
+    chunks: list[ArticleChunk] = []
     for law in laws:
         for article in law.articles:
             if article.article_type != "A":
                 continue
-            node_id = f"{article.pcode}#{article.article_no}"
-            docs.append(
-                f"{article.law_name} {article.article_no}\n"
-                f"{article.artical_content}"
+            chunks.append(
+                ArticleChunk.from_article(article, law.law_modified_date)
             )
-            ids.append(node_id)
-            metas.append(
-                {
-                    "pcode": article.pcode,
-                    "article_no": article.article_no,
-                    "law_name": article.law_name,
-                    "law_modified_date": law.law_modified_date,
-                }
-            )
-    return docs, ids, metas
+    return chunks
 
 
 def _filter_new(
-    b_docs: list[str],
-    b_ids: list[str],
-    b_metas: list[dict[str, str]],
+    b_chunks: list[ArticleChunk],
     existing: set[str],
-) -> tuple[list[str], list[str], list[dict[str, str]]]:
-    """Return only the items whose IDs are not yet in Chroma."""
+) -> list[ArticleChunk]:
+    """回傳 ID 尚未存在於 Chroma 的 ArticleChunk。
 
-    # 僅用於第一次建立, 這邊沒有處理同 ID 但 law_modified_date 比較新的狀況
-    new_docs: list[str] = []
-    new_ids: list[str] = []
-    new_metas: list[dict[str, str]] = []
-    for d, id_, m in zip(b_docs, b_ids, b_metas):
-        if id_ not in existing:
-            new_docs.append(d)
-            new_ids.append(id_)
-            new_metas.append(m)
-    return new_docs, new_ids, new_metas
+    Args:
+        b_chunks (list[ArticleChunk]): 本批次的條文清單。
+        existing (set[str]): 已存在於 Chroma 的 ID 集合。
+
+    Returns:
+        list[ArticleChunk]: 需要新增的條文。
+    """
+    # 僅用於第一次建立，未處理同 ID 但 law_modified_date 較新的情況
+    return [c for c in b_chunks if c.to_node_id() not in existing]
 
 
 class ChunkBuilder:
-    """Builds and queries the Chroma 'chunks' collection."""
+    """建立並查詢 Chroma 的 chunks collection。"""
 
-    def __init__(self, persist_directory: str, embeddings: Embeddings) -> None:
+    def __init__(
+        self, persist_directory: str, embeddings: Embeddings
+    ) -> None:
         self._persist_dir = persist_directory
         self._embeddings = embeddings
         self._col = self._make_col()
 
     def _make_col(self) -> Chroma:
-        """Bind a new Chroma collection to this persist_directory."""
-        # 一個 Chroma Client 就只有一個 Client
+        """建立並綁定 Chroma collection 到 persist_directory。
+
+        Returns:
+            Chroma: 綁定完成的 Chroma collection。
+        """
+        # 一個 persist_directory 對應一個 Chroma Client
         return Chroma(
             collection_name=_COLLECTION_NAME,
             persist_directory=self._persist_dir,
@@ -78,83 +74,109 @@ class ChunkBuilder:
         )
 
     def count(self) -> int:
-        """Access _collection.count(); LangChain wrapper doesn't expose it."""
+        """回傳 collection 中的條文總數。
+
+        Returns:
+            int: 已 embed 的條文數量。
+        """
         return self._col._collection.count()
 
     def is_populated(self) -> bool:
-        """Return True if the collection has at least one embedded chunk."""
+        """回傳 collection 是否已有至少一筆資料。
+
+        Returns:
+            bool: 有資料為 True，空 collection 為 False。
+        """
         return self.count() > 0
 
     def build(self, laws: list[Law], batch_sleep: float = 0.0) -> int:
-        """Embed laws into Chroma, skipping IDs that already exist.
+        """將法律條文 embed 並存入 Chroma，跳過已存在的 ID。
 
-        Returns the number of newly added chunks.
+        Args:
+            laws (list[Law]): 要建立索引的法律清單。
+            batch_sleep (float): 每批次後的等待秒數，避免 API 限流。
+
+        Returns:
+            int: 本次新增的條文數量。
         """
-        docs, ids, metas = _collect(laws)
-        total = len(docs)
+        chunks = _collect(laws)
+        total = len(chunks)
         added = 0
         with tqdm(total=total, unit="chunk") as pbar:
             for i in range(0, total, _BATCH_SIZE):
-                b_docs = docs[i : i + _BATCH_SIZE]
-                b_ids = ids[i : i + _BATCH_SIZE]
-                b_metas = metas[i : i + _BATCH_SIZE]
+                b_chunks = chunks[i : i + _BATCH_SIZE]
+                b_ids = [c.to_node_id() for c in b_chunks]
 
-                # Chroma.get(ids=b_ids) 會去 ChromaDB 查詢有存在哪些 id了
-                # A dict with the keys `"ids"`, `"embeddings"`, `"metadatas"`,
-                # `"documents"`.
-                existing: set[str] = set(self._col.get(ids=b_ids)["ids"] or [])
-                n_docs, n_ids, n_metas = _filter_new(
-                    b_docs,
-                    b_ids,
-                    b_metas,
-                    existing,
+                # Chroma.get(ids=b_ids) 查詢哪些 ID 已存在
+                existing: set[str] = set(
+                    self._col.get(ids=b_ids)["ids"] or []
                 )
-                if n_ids:
+                new_chunks = _filter_new(b_chunks, existing)
+                if new_chunks:
                     self._col.add_texts(
-                        texts=n_docs,
-                        ids=n_ids,
-                        metadatas=n_metas,
+                        texts=[c.to_document() for c in new_chunks],
+                        ids=[c.to_node_id() for c in new_chunks],
+                        metadatas=[c.to_metadata() for c in new_chunks],
                     )
-                    added += len(n_ids)
+                    added += len(new_chunks)
                     time.sleep(batch_sleep)
-                pbar.update(len(b_docs))
+                pbar.update(len(b_chunks))
         return added
 
     def clear(self) -> None:
-        """Delete and recreate the collection, wiping all embedded data."""
+        """刪除並重建 collection，清除所有已 embed 的資料。"""
         self._col.delete_collection()
         self._col = self._make_col()
 
-    def peek(self, n: int = 3) -> list[dict[str, object]]:
-        """Return n sample entries without triggering embedding."""
+    def _to_chunks(
+        self,
+        docs_with_scores: Sequence[tuple[Document, float | None]],
+    ) -> list[ArticleChunk]:
+        """將 Chroma Document 清單轉換為 ArticleChunk 清單。
+
+        peek_chunks 與 search_chunks 共用的轉換邏輯。
+
+        Args:
+            docs_with_scores (list[tuple[Document, float | None]]):
+                Document 與相似度分數的配對清單，peek 時分數為 None。
+
+        Returns:
+            list[ArticleChunk]: 對應的 ArticleChunk 清單。
+        """
+        return [
+            ArticleChunk.from_chroma(doc, score=score)
+            for doc, score in docs_with_scores
+        ]
+
+    def peek_chunks(self, n: int = 3) -> list[ArticleChunk]:
+        """不觸發 embedding，直接取出 n 筆樣本條文。
+
+        Args:
+            n (int): 要取出的條文數量，預設為 3。
+
+        Returns:
+            list[ArticleChunk]: 樣本條文清單，score 為 None。
+        """
         raw = self._col.get(limit=n, include=["documents", "metadatas"])
-        raw_ids: list[str] = raw["ids"] or []
         raw_docs: list[str] = raw["documents"] or []
         raw_metas: list[dict[str, str]] = raw["metadatas"] or []
-        out: list[dict[str, object]] = []
-        for i, doc in enumerate(raw_docs):
-            meta: dict[str, str] = raw_metas[i] if i < len(raw_metas) else {}
-            out.append(
-                {
-                    "id": raw_ids[i] if i < len(raw_ids) else "",
-                    "document": doc,
-                    "metadata": meta,
-                }
-            )
-        return out
-
-    def search(self, query: str, k: int = 5) -> list[dict[str, object]]:
-        """Embed query and return top-k articles ranked by similarity score."""
-        results = self._col.similarity_search_with_score(query, k=k)
-        return [
-            {
-                "node_id": (
-                    f"{doc.metadata['pcode']}" f"#{doc.metadata['article_no']}"
-                ),
-                "law_name": doc.metadata["law_name"],
-                "article_no": doc.metadata["article_no"],
-                "content": doc.page_content,
-                "score": score,
-            }
-            for doc, score in results
+        pairs: list[tuple[Document, float | None]] = [
+            (Document(page_content=doc, metadata=raw_metas[i]), None)
+            for i, doc in enumerate(raw_docs)
         ]
+        return self._to_chunks(pairs)
+
+    def search_chunks(
+        self, query: str, k: int = 5
+    ) -> list[ArticleChunk]:
+        """Embed query 並回傳相似度最高的前 k 筆條文。
+
+        Args:
+            query (str): 自然語言查詢字串。
+            k (int): 回傳結果數量，預設為 5。
+
+        Returns:
+            list[ArticleChunk]: 依相似度排序的條文清單，含 score。
+        """
+        results = self._col.similarity_search_with_score(query, k=k)
+        return self._to_chunks(results)

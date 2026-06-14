@@ -5,6 +5,7 @@ from langchain_core.documents import Document
 
 from agent.nodes.retrieve import make_retrieve_node
 from agent.state import SubQuery
+from ingestion.law_vector.article_chunk import ArticleChunk
 
 
 # ── Helpers ───────────────────────────────────────────────────────────
@@ -46,14 +47,15 @@ def _chunk_result(
     article_no: str = "第 184 條",
     law_name: str = "民法",
     content: str = "條文內容",
-) -> dict:
-    return {
-        "node_id": f"{pcode}#{article_no}",
-        "law_name": law_name,
-        "article_no": article_no,
-        "content": content,
-        "score": 0.9,
-    }
+) -> ArticleChunk:
+    return ArticleChunk(
+        pcode=pcode,
+        law_name=law_name,
+        article_no=article_no,
+        artical_content=content,
+        law_modified_date="20240101",
+        score=0.9,
+    )
 
 
 def _article_node(
@@ -78,7 +80,7 @@ def _article_node(
 @pytest.fixture
 def mock_builder() -> MagicMock:
     b = MagicMock()
-    b.search.return_value = []
+    b.search_chunks.return_value = []
     return b
 
 
@@ -96,7 +98,7 @@ def mock_graph() -> MagicMock:
 def test_semantic_returns_chunk_results(
     mock_builder: MagicMock, mock_graph: MagicMock
 ) -> None:
-    mock_builder.search.return_value = [_chunk_result()]
+    mock_builder.search_chunks.return_value = [_chunk_result()]
     node = make_retrieve_node(mock_builder, mock_graph)
     result = node(_state([_sub_query("侵權行為", "law:semantic")]))
 
@@ -109,13 +111,13 @@ def test_semantic_returns_chunk_results(
 def test_hyde_uses_query_directly_for_search(
     mock_builder: MagicMock, mock_graph: MagicMock
 ) -> None:
-    mock_builder.search.return_value = [_chunk_result()]
+    mock_builder.search_chunks.return_value = [_chunk_result()]
     node = make_retrieve_node(mock_builder, mock_graph)
     result = node(_state([
         _sub_query("假設條文片段（HyDE 已生成）", "law:hyde")
     ]))
 
-    mock_builder.search.assert_called_once_with(
+    mock_builder.search_chunks.assert_called_once_with(
         "假設條文片段（HyDE 已生成）", k=5
     )
     assert len(result["documents"]) == 1
@@ -194,7 +196,7 @@ def test_direct_lookup_law_node_skipped(
 def test_graph_expand_includes_original_and_cited(
     mock_builder: MagicMock, mock_graph: MagicMock
 ) -> None:
-    mock_builder.search.return_value = [
+    mock_builder.search_chunks.return_value = [
         _chunk_result("B0000001", "第 184 條")
     ]
     mock_graph.get_cited_with_edges.return_value = [
@@ -215,7 +217,7 @@ def test_graph_expand_includes_original_and_cited(
 def test_graph_expand_expand_k_limits_citations(
     mock_builder: MagicMock, mock_graph: MagicMock
 ) -> None:
-    mock_builder.search.return_value = [
+    mock_builder.search_chunks.return_value = [
         _chunk_result("B0000001", "第 184 條")
     ]
     mock_graph.get_cited_with_edges.return_value = [
@@ -240,7 +242,7 @@ def test_judgment_tavily_returns_no_documents(
     ]))
 
     assert result["documents"] == []
-    mock_builder.search.assert_not_called()
+    mock_builder.search_chunks.assert_not_called()
 
 
 # ── 去重 ──────────────────────────────────────────────────────────────
@@ -249,7 +251,7 @@ def test_deduplication_across_sub_queries(
     mock_builder: MagicMock, mock_graph: MagicMock
 ) -> None:
     same_result = _chunk_result("B0000001", "第 184 條")
-    mock_builder.search.return_value = [same_result]
+    mock_builder.search_chunks.return_value = [same_result]
     node = make_retrieve_node(mock_builder, mock_graph)
     result = node(_state([
         _sub_query("q1", "law:semantic"),

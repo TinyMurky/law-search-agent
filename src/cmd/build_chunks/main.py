@@ -54,24 +54,23 @@ def _build_chunks(builder: ChunkBuilder, laws: list[Law], force: bool) -> int:
 
 def _print_peek(builder: ChunkBuilder) -> None:
     print("\n--- Chroma 內的條文樣本 ---")
-    for row in builder.peek(3):
-        print(f"id: {row['id']}")
-        doc = str(row["document"])
-        preview = doc[:60].replace("\n", " ")
+    for chunk in builder.peek_chunks(3):
+        print(f"id: {chunk.to_node_id()}")
+        preview = chunk.to_document()[:60].replace("\n", " ")
         print(f"  {preview}...")
         print()
 
 
 def _print_search(builder: ChunkBuilder) -> None:
     print(f"\n--- 語意搜尋：「{_SAMPLE_QUERY}」---")
-    results = builder.search(_SAMPLE_QUERY, k=5)
-    for i, r in enumerate(results, 1):
-        name = r["law_name"]
-        no = r["article_no"]
-        score = r["score"]
-        print(f"{i}. [{name}] {no}  score={score:.4f}")
-        content = str(r["content"])
-        preview = content[:60].replace("\n", " ")
+    results = builder.search_chunks(_SAMPLE_QUERY, k=5)
+    for i, chunk in enumerate(results, 1):
+        score = chunk.score or 0.0
+        print(
+            f"{i}. [{chunk.law_name}] {chunk.article_no}"
+            f"  score={score:.4f}"
+        )
+        preview = chunk.artical_content[:60].replace("\n", " ")
         print(f"   {preview}...")
 
 

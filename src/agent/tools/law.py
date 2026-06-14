@@ -18,11 +18,11 @@ def make_law_tools(
     @tool
     def search_law_articles(query: str) -> str:
         """語意搜尋法條，找與查詢概念最相關的條文。"""
-        results = chunk_builder.search(query, k=5)
+        results = chunk_builder.search_chunks(query, k=5)
         if not results:
             return "找不到相關條文。"
         parts = [
-            f"【{r['law_name']} {r['article_no']}】\n{r['content']}"
+            f"【{r.law_name} {r.article_no}】\n{r.artical_content}"
             for r in results
         ]
         return _SEP.join(parts)

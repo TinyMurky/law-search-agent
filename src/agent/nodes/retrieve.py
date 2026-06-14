@@ -9,6 +9,7 @@ from langchain_core.documents import Document
 from agent.state import AgenticRAGState
 from ingestion.law_graph.nodes import ArticleNodeAttrs
 from ingestion.law_graph.nx_law_graph import NxLawGraph
+from ingestion.law_vector.article_chunk import ArticleChunk
 from ingestion.law_vector.chunk_builder import ChunkBuilder
 
 # VectorDB 會搜出幾個結果
@@ -30,16 +31,19 @@ def _normalize_article_no(raw: str) -> str:
 
 
 def _search_result_to_doc(
-    r: dict[str, object],
+    chunk: ArticleChunk,
     strategy: str,
 ) -> Document:
     return Document(
-        page_content=(f"【{r['law_name']} {r['article_no']}】\n{r['content']}"),
+        page_content=(
+            f"【{chunk.law_name} {chunk.article_no}】\n"
+            f"{chunk.artical_content}"
+        ),
         metadata={
-            "node_id": r["node_id"],
-            "pcode": cast(str, r["node_id"]).split("#")[0],
-            "article_no": r["article_no"],
-            "law_name": r["law_name"],
+            "node_id": chunk.to_node_id(),
+            "pcode": chunk.pcode,
+            "article_no": chunk.article_no,
+            "law_name": chunk.law_name,
             "source": "law",
             "strategy": strategy,
         },
@@ -94,12 +98,14 @@ def make_retrieve_node(
 
             if strategy in ("law:semantic", "law:hyde"):
                 try:
-                    results = chunk_builder.search(sub["query"], k=_SEARCH_K)
+                    results = chunk_builder.search_chunks(
+                        sub["query"], k=_SEARCH_K,
+                    )
                 except Exception as e:
                     print(f"[retrieve] embedding 錯誤，跳過：{e}")
                     continue
-                for r in results:
-                    _add(_search_result_to_doc(r, strategy))
+                for chunk in results:
+                    _add(_search_result_to_doc(chunk, strategy))
 
             elif strategy == "law:direct_lookup":
                 pcode = law_graph.find_pcode_by_name(sub["law_name"] or "")
@@ -122,16 +128,17 @@ def make_retrieve_node(
 
             elif strategy == "law:graph_expand":
                 try:
-                    results = chunk_builder.search(sub["query"], k=_SEARCH_K)
+                    results = chunk_builder.search_chunks(
+                        sub["query"], k=_SEARCH_K,
+                    )
                 except Exception as e:
                     print(f"[retrieve] embedding 錯誤，跳過：{e}")
                     continue
-                for r in results:
-                    _add(_search_result_to_doc(r, strategy))
-                    node_id_str = cast(str, r["node_id"])
-                    pcode = node_id_str.split("#")[0]
-                    article_no = node_id_str.split("#", 1)[1]
-                    cited = law_graph.get_cited_with_edges(pcode, article_no)
+                for chunk in results:
+                    _add(_search_result_to_doc(chunk, strategy))
+                    cited = law_graph.get_cited_with_edges(
+                        chunk.pcode, chunk.article_no,
+                    )
                     for cited_id, _ in cited[:_EXPAND_K]:
                         cited_node = law_graph.get_node(cited_id)
                         if cited_node is None:
