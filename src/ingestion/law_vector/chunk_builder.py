@@ -13,7 +13,9 @@ _COLLECTION_NAME = "chunks"
 def _collect(
     laws: list[Law],
 ) -> tuple[list[str], list[str], list[dict[str, str]]]:
-    """Collect ArticleType='A' articles as parallel lists for add_texts()."""
+    """
+    Collect ArticleType='A' (條文) articles as parallel lists for add_texts().
+    """
     docs: list[str] = []
     ids: list[str] = []
     metas: list[dict[str, str]] = []
@@ -93,16 +95,19 @@ class ChunkBuilder:
         added = 0
         with tqdm(total=total, unit="chunk") as pbar:
             for i in range(0, total, _BATCH_SIZE):
-                b_docs = docs[i:i + _BATCH_SIZE]
-                b_ids = ids[i:i + _BATCH_SIZE]
-                b_metas = metas[i:i + _BATCH_SIZE]
+                b_docs = docs[i : i + _BATCH_SIZE]
+                b_ids = ids[i : i + _BATCH_SIZE]
+                b_metas = metas[i : i + _BATCH_SIZE]
 
                 # Chroma.get(ids=b_ids) 會去 ChromaDB 查詢有存在哪些 id了
                 # A dict with the keys `"ids"`, `"embeddings"`, `"metadatas"`,
                 # `"documents"`.
                 existing: set[str] = set(self._col.get(ids=b_ids)["ids"] or [])
                 n_docs, n_ids, n_metas = _filter_new(
-                    b_docs, b_ids, b_metas, existing
+                    b_docs,
+                    b_ids,
+                    b_metas,
+                    existing,
                 )
                 if n_ids:
                     self._col.add_texts(
