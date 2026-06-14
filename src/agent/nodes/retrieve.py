@@ -35,10 +35,7 @@ def _search_result_to_doc(
     strategy: str,
 ) -> Document:
     return Document(
-        page_content=(
-            f"【{chunk.law_name} {chunk.article_no}】\n"
-            f"{chunk.artical_content}"
-        ),
+        page_content=(chunk.to_document()),
         metadata={
             "node_id": chunk.to_node_id(),
             "pcode": chunk.pcode,
@@ -55,11 +52,11 @@ def _article_node_to_doc(
     article: ArticleNodeAttrs,
     strategy: str,
 ) -> Document:
+    law = article["law_name"]
+    no = article["article_no"]
+    body = article["content"]
     return Document(
-        page_content=(
-            f"【{article['law_name']} {article['article_no']}】\n"
-            f"{article['content']}"
-        ),
+        page_content=f"{law} {no}\n{body}",
         metadata={
             "node_id": node_id,
             "pcode": article["pcode"],
@@ -99,7 +96,8 @@ def make_retrieve_node(
             if strategy in ("law:semantic", "law:hyde"):
                 try:
                     results = chunk_builder.search_chunks(
-                        sub["query"], k=_SEARCH_K,
+                        sub["query"],
+                        k=_SEARCH_K,
                     )
                 except Exception as e:
                     print(f"[retrieve] embedding 錯誤，跳過：{e}")
@@ -129,7 +127,8 @@ def make_retrieve_node(
             elif strategy == "law:graph_expand":
                 try:
                     results = chunk_builder.search_chunks(
-                        sub["query"], k=_SEARCH_K,
+                        sub["query"],
+                        k=_SEARCH_K,
                     )
                 except Exception as e:
                     print(f"[retrieve] embedding 錯誤，跳過：{e}")
@@ -137,7 +136,8 @@ def make_retrieve_node(
                 for chunk in results:
                     _add(_search_result_to_doc(chunk, strategy))
                     cited = law_graph.get_cited_with_edges(
-                        chunk.pcode, chunk.article_no,
+                        chunk.pcode,
+                        chunk.article_no,
                     )
                     for cited_id, _ in cited[:_EXPAND_K]:
                         cited_node = law_graph.get_node(cited_id)
