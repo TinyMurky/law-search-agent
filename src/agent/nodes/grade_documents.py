@@ -5,22 +5,21 @@ from typing import Literal
 
 from langchain_core.output_parsers import JsonOutputParser
 from langchain_core.prompts import ChatPromptTemplate
+from langchain_core.runnables import Runnable
 from langchain_google_genai import ChatGoogleGenerativeAI
 from pydantic import BaseModel, Field
 
 from agent.state import AgenticRAGState
 from agent.strategy_registry import STRATEGY_REGISTRY
 
-
 # ── Pydantic schema ───────────────────────────────────────────────────
+
 
 class RelevanceResult(BaseModel):
     """grade_documents 節點文件相關性評分的輸出結構。"""
 
-    score: Literal["yes", "no"] = Field(
-        description="此文件是否與問題相關"
-    )
-    reason: str = Field(description="一句話說明判斷依據")
+    score: Literal["yes", "no"] = Field(description="此文件是否與問題相關")
+    reason: str = Field(description="一句話說明判斷依據, 不知道如何判斷的，回答不知道")
 
 
 # ── Prompt ────────────────────────────────────────────────────────────
@@ -30,7 +29,8 @@ _GRADER_SYSTEM = """\
 判斷給定的法律條文是否能協助回答使用者的問題。
 
 評分規則：
-- "yes"：條文內容與問題直接相關，或包含回答問題所需的法律概念
+- "yes"：條文內容與問題直接相關，或包含回答問題所需的法律概念,
+         不知道如含判斷的請先使用 yes
 - "no" ：條文內容與問題無關，或只是泛泛的程序條文
 
 注意：不需要條文「完整回答」問題，只要「有助於回答」就算相關。
@@ -41,9 +41,10 @@ _GRADER_SYSTEM = """\
 
 # ── Chain builder ─────────────────────────────────────────────────────
 
-def _make_grader_chain(  # type: ignore[no-untyped-def]
+
+def _make_grader_chain(
     llm: ChatGoogleGenerativeAI,
-):
+) -> Runnable:
     """建立文件相關性評分（relevance grader）的 LLM chain。
 
     Args:
@@ -54,20 +55,21 @@ def _make_grader_chain(  # type: ignore[no-untyped-def]
             對應 dict 的 chain。
     """
     parser = JsonOutputParser(pydantic_object=RelevanceResult)
-    prompt = ChatPromptTemplate.from_messages([
-        ("system", _GRADER_SYSTEM),
-        ("human", "問題：{question}\n\n條文：{document}"),
-    ])
+    prompt = ChatPromptTemplate.from_messages(
+        [
+            ("system", _GRADER_SYSTEM),
+            ("human", "使用者問題：{question}\n\n參考條文：{document}"),
+        ]
+    )
     return (
-        prompt.partial(
-            format_instructions=parser.get_format_instructions()
-        )
+        prompt.partial(format_instructions=parser.get_format_instructions())
         | llm
         | parser
     )
 
 
 # ── Routing ───────────────────────────────────────────────────────────
+
 
 def route_after_grade(state: AgenticRAGState) -> str:
     """grade_documents 後的路由，供 LangGraph conditional edge 使用。
@@ -88,6 +90,7 @@ def route_after_grade(state: AgenticRAGState) -> str:
 
 
 # ── Node factory ──────────────────────────────────────────────────────
+
 
 def make_grade_documents_node(
     llm: ChatGoogleGenerativeAI,
@@ -111,32 +114,31 @@ def make_grade_documents_node(
         relevant_docs = []
 
         for i, doc in enumerate(documents):
+            # 這邊先寫死哪些 strategy 需要被 grading
             strategy = str(doc.metadata.get("strategy", ""))
             config = STRATEGY_REGISTRY.get(
                 strategy, {"requires_grading": True}
             )
+
             if not config["requires_grading"]:
                 relevant_docs.append(doc)
                 print(f"[grade] Chunk {i + 1}：✓ {strategy}（跳過）")
                 continue
 
-            result: dict[str, object] = grader.invoke({
-                "question": question,
-                "document": doc.page_content,
-            })
+            result: dict[str, object] = grader.invoke(
+                {
+                    "question": question,
+                    "document": doc.page_content,
+                }
+            )
+
             if result["score"] == "yes":
                 relevant_docs.append(doc)
                 print(f"[grade] Chunk {i + 1}：✓ 相關")
             else:
-                print(
-                    f"[grade] Chunk {i + 1}："
-                    f"✗ 不相關（{result['reason']}）"
-                )
+                print(f"[grade] Chunk {i + 1}：" f"✗ 不相關（{result['reason']}）")
 
-        print(
-            f"[grade] 保留 {len(relevant_docs)}"
-            f"/{len(documents)} 個文件"
-        )
+        print(f"[grade] 保留 {len(relevant_docs)}" f"/{len(documents)} 個文件")
         return {
             "documents": relevant_docs,
             "grade_passed": len(relevant_docs) > 0,
