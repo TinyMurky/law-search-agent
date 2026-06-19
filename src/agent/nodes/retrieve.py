@@ -36,6 +36,9 @@ def _search_result_to_doc(
     chunk: ArticleChunk,
     strategy: str,
 ) -> Document:
+    """
+    將 vectorDB 取出的 ArticleChunk 轉成 llm 原生的 Document type
+    """
     return Document(
         page_content=(chunk.to_document()),
         metadata={
@@ -135,14 +138,15 @@ def make_retrieve_node(
                         chunk.pcode,
                         chunk.article_no,
                     )
-                    for cited_id, _ in cited[:_EXPAND_K]:
-                        cited_node = law_graph.get_node(cited_id)
+                    for cited_law_node_id, _ in cited[:_EXPAND_K]:
+                        cited_node = law_graph.get_node(cited_law_node_id)
                         if cited_node is None:
                             continue
                         if cited_node["type"] == "article":
                             _add(
                                 _article_node_to_doc(
-                                    cited_id,
+                                    cited_law_node_id,
+                                    # 這邊先暫時這樣, 之後可以改成有更細節的專門 get_artical_node
                                     cast(ArticleNodeAttrs, cited_node),
                                     strategy,
                                 )
