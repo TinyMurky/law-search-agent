@@ -20,6 +20,12 @@ class NxLawGraph:
     """
 
     def __init__(self, G: nx.DiGraph) -> None:
+        """以既有的 NetworkX DiGraph 初始化查詢物件。
+
+        Args:
+            G (nx.DiGraph): 已建好的法規圖，節點與邊需符合本類別
+                docstring 所述的結構。
+        """
         self._G = G
 
     def get_related(
@@ -28,7 +34,19 @@ class NxLawGraph:
         relation: str,
         direction: Direction = "out",
     ) -> list[str]:
-        """通用關係查詢，以 relation 和方向過濾邊。"""
+        """通用關係查詢，以 relation 和方向過濾邊。
+
+        Args:
+            node_id (str): 起點節點 ID。
+            relation (str): 邊的 relation 屬性，例如 "cites"、
+                "contains"。
+            direction (Direction): "out" 取出邊鄰居，"in" 取入邊
+                鄰居，預設為 "out"。
+
+        Returns:
+            list[str]: 符合 relation 與方向的鄰居節點 ID 清單，
+                node_id 不存在時回傳空清單。
+        """
         if node_id not in self._G:
             return []
         if direction == "out":
@@ -46,7 +64,16 @@ class NxLawGraph:
     def get_cited_articles(
         self, pcode: str, article_no: str
     ) -> list[str]:
-        """回傳此條文引用的所有條文（cites 出邊）。"""
+        """回傳此條文引用的所有條文（cites 出邊）。
+
+        Args:
+            pcode (str): 條文所屬法律 pcode，例如 "B0000001"。
+            article_no (str): 條號，例如 "第 184 條"。
+
+        Returns:
+            list[str]: 被引用的條文節點 ID 清單，無引用時回傳
+                空清單。
+        """
         return [
             nid for nid, _ in self.get_cited_with_edges(pcode, article_no)
         ]
@@ -54,13 +81,30 @@ class NxLawGraph:
     def get_citing_articles(
         self, pcode: str, article_no: str
     ) -> list[str]:
-        """回傳引用此條文的所有條文（cites 入邊）。"""
+        """回傳引用此條文的所有條文（cites 入邊）。
+
+        Args:
+            pcode (str): 條文所屬法律 pcode，例如 "B0000001"。
+            article_no (str): 條號，例如 "第 184 條"。
+
+        Returns:
+            list[str]: 引用此條文的條文節點 ID 清單，無引用時
+                回傳空清單。
+        """
         return [
             nid for nid, _ in self.get_citing_with_edges(pcode, article_no)
         ]
 
     def get_law_articles(self, pcode: str) -> list[str]:
-        """回傳某部法律的所有條文節點 ID（contains 出邊）。"""
+        """回傳某部法律的所有條文節點 ID（contains 出邊）。
+
+        Args:
+            pcode (str): 法律唯一識別碼，例如 "B0000001"。
+
+        Returns:
+            list[str]: 該法律所有條文節點 ID 清單，pcode 不存在
+                時回傳空清單。
+        """
         return self.get_related(pcode, "contains", "out")
 
     def get_node(
@@ -124,7 +168,16 @@ class NxLawGraph:
     def get_edge(
         self, u: str, v: str
     ) -> ContainsEdgeAttrs | CitesEdgeAttrs | None:
-        """取出兩節點之間的邊屬性，不存在回傳 None。"""
+        """取出兩節點之間的邊屬性，不存在回傳 None。
+
+        Args:
+            u (str): 邊的起點節點 ID。
+            v (str): 邊的終點節點 ID。
+
+        Returns:
+            ContainsEdgeAttrs | CitesEdgeAttrs | None: 邊屬性，
+                u 到 v 之間沒有邊時回傳 None。
+        """
         if not self._G.has_edge(u, v):
             return None
         raw = self._G.edges[u, v]
@@ -147,6 +200,18 @@ class NxLawGraph:
           "in"  — 指向 node_id 的邊（鄰居 → node_id）
                   例：取引用此條文的來源 → get_neighbors_with_edges(
                           id, "cites", "in")
+
+        Args:
+            node_id (str): 起點節點 ID。
+            relation (str): 邊的 relation 屬性，例如 "cites"、
+                "contains"。
+            direction (Direction): "out" 取出邊鄰居，"in" 取入邊
+                鄰居，預設為 "out"。
+
+        Returns:
+            list[tuple[str, ContainsEdgeAttrs | CitesEdgeAttrs]]:
+                [(鄰居節點 ID, 邊屬性), ...]，node_id 不存在或
+                無符合的邊時回傳空清單。
         """
         if node_id not in self._G:
             return []
@@ -165,7 +230,16 @@ class NxLawGraph:
     def get_cited_with_edges(
         self, pcode: str, article_no: str
     ) -> list[tuple[str, CitesEdgeAttrs]]:
-        """取條文引用的對象，連同邊屬性（含 citation_type）一起回傳。"""
+        """取條文引用的對象，連同邊屬性（含 citation_type）一起回傳。
+
+        Args:
+            pcode (str): 條文所屬法律 pcode，例如 "B0000001"。
+            article_no (str): 條號，例如 "第 184 條"。
+
+        Returns:
+            list[tuple[str, CitesEdgeAttrs]]: [(被引用條文節點
+                ID, 邊屬性), ...]，無引用時回傳空清單。
+        """
         pairs = self.get_neighbors_with_edges(
             f"{pcode}#{article_no}", "cites", "out"
         )
@@ -174,14 +248,30 @@ class NxLawGraph:
     def get_citing_with_edges(
         self, pcode: str, article_no: str
     ) -> list[tuple[str, CitesEdgeAttrs]]:
-        """取引用此條文的來源，連同邊屬性（含 citation_type）一起回傳。"""
+        """取引用此條文的來源，連同邊屬性（含 citation_type）一起回傳。
+
+        Args:
+            pcode (str): 條文所屬法律 pcode，例如 "B0000001"。
+            article_no (str): 條號，例如 "第 184 條"。
+
+        Returns:
+            list[tuple[str, CitesEdgeAttrs]]: [(引用此條文的
+                節點 ID, 邊屬性), ...]，無引用時回傳空清單。
+        """
         pairs = self.get_neighbors_with_edges(
             f"{pcode}#{article_no}", "cites", "in"
         )
         return [(nid, cast(CitesEdgeAttrs, e)) for nid, e in pairs]
 
     def find_pcode_by_name(self, law_name: str) -> str | None:
-        """依法律名稱查找 pcode，找不到回傳 None。"""
+        """依法律名稱查找 pcode，找不到回傳 None。
+
+        Args:
+            law_name (str): 法律名稱，例如「民法」。
+
+        Returns:
+            str | None: 對應的法律 pcode，找不到時回傳 None。
+        """
         for node_id, attrs in self._G.nodes(data=True):
             if (
                 attrs.get("type") == "law"
