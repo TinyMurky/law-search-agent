@@ -77,9 +77,7 @@ def make_rewrite_query_node(
             "rewritten_queries": [
                 SubQuery(
                     query=new_query,
-                    # 這邊暫時先用 graph_expand, 他可以有 chunk 又有 graph
-                    # strategy="law:semantic",
-                    strategy="law:graph_expand",
+                    strategy="law:semantic",
                     law_name=None,
                     article_no=None,
                 )
