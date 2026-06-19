@@ -6,13 +6,14 @@ from typing import Literal
 from langchain_core.messages import AIMessage
 from langchain_core.output_parsers import JsonOutputParser, StrOutputParser
 from langchain_core.prompts import ChatPromptTemplate
+from langchain_core.runnables import Runnable
 from langchain_google_genai import ChatGoogleGenerativeAI
 from pydantic import BaseModel, Field
 
 from agent.state import AgenticRAGState
 
-
 # ── Pydantic schemas ──────────────────────────────────────────────────
+
 
 class HallucinationResult(BaseModel):
     """generate 節點幻覺檢查（hallucination grader）的輸出結構。"""
@@ -29,9 +30,7 @@ class AnswerResult(BaseModel):
     score: Literal["yes", "no"] = Field(
         description="答案是否真正回答了問題（yes=有回答，no=未完整）"
     )
-    missing: str = Field(
-        description="缺少什麼資訊（若有回答則填 none）"
-    )
+    missing: str = Field(description="缺少什麼資訊（若有回答則填 none）")
 
 
 # ── Prompts ───────────────────────────────────────────────────────────
@@ -77,10 +76,11 @@ _ANSWER_SYSTEM = """\
 
 # ── Chain builders ────────────────────────────────────────────────────
 
-def _make_generate_chain(  # type: ignore[no-untyped-def]
+
+def _make_generate_chain(
     llm: ChatGoogleGenerativeAI,
     system_prompt: str,
-):
+) -> Runnable:
     """建立依指定 system prompt 生成答案的 LLM chain。
 
     Args:
@@ -91,16 +91,18 @@ def _make_generate_chain(  # type: ignore[no-untyped-def]
     Returns:
         Runnable: 輸入 context 與 question，輸出答案字串的 chain。
     """
-    prompt = ChatPromptTemplate.from_messages([
-        ("system", system_prompt),
-        ("human", "{question}"),
-    ])
+    prompt = ChatPromptTemplate.from_messages(
+        [
+            ("system", system_prompt),
+            ("human", "{question}"),
+        ]
+    )
     return prompt | llm | StrOutputParser()
 
 
-def _make_hallucination_grader_chain(  # type: ignore[no-untyped-def]
+def _make_hallucination_grader_chain(
     llm: ChatGoogleGenerativeAI,
-):
+) -> Runnable:
     """建立幻覺檢查（hallucination grader）的 LLM chain。
 
     Args:
@@ -111,22 +113,22 @@ def _make_hallucination_grader_chain(  # type: ignore[no-untyped-def]
             HallucinationResult 對應 dict 的 chain。
     """
     parser = JsonOutputParser(pydantic_object=HallucinationResult)
-    prompt = ChatPromptTemplate.from_messages([
-        ("system", _HALLUCINATION_SYSTEM),
-        ("human", "條文內容：{documents}\n\n答案：{generation}"),
-    ])
+    prompt = ChatPromptTemplate.from_messages(
+        [
+            ("system", _HALLUCINATION_SYSTEM),
+            ("human", "條文內容：{documents}\n\n答案：{generation}"),
+        ]
+    )
     return (
-        prompt.partial(
-            format_instructions=parser.get_format_instructions()
-        )
+        prompt.partial(format_instructions=parser.get_format_instructions())
         | llm
         | parser
     )
 
 
-def _make_answer_grader_chain(  # type: ignore[no-untyped-def]
+def _make_answer_grader_chain(
     llm: ChatGoogleGenerativeAI,
-):
+) -> Runnable:
     """建立答案品質檢查（answer grader）的 LLM chain。
 
     Args:
@@ -137,20 +139,21 @@ def _make_answer_grader_chain(  # type: ignore[no-untyped-def]
             對應 dict 的 chain。
     """
     parser = JsonOutputParser(pydantic_object=AnswerResult)
-    prompt = ChatPromptTemplate.from_messages([
-        ("system", _ANSWER_SYSTEM),
-        ("human", "問題：{question}\n\n答案：{generation}"),
-    ])
+    prompt = ChatPromptTemplate.from_messages(
+        [
+            ("system", _ANSWER_SYSTEM),
+            ("human", "問題：{question}\n\n答案：{generation}"),
+        ]
+    )
     return (
-        prompt.partial(
-            format_instructions=parser.get_format_instructions()
-        )
+        prompt.partial(format_instructions=parser.get_format_instructions())
         | llm
         | parser
     )
 
 
 # ── Routing ───────────────────────────────────────────────────────────
+
 
 def route_after_generate(state: AgenticRAGState) -> str:
     """generate 後的路由，供 LangGraph conditional edge 使用。
@@ -180,6 +183,7 @@ def route_after_generate(state: AgenticRAGState) -> str:
 
 # ── Node factory ──────────────────────────────────────────────────────
 
+
 def make_generate_node(
     llm: ChatGoogleGenerativeAI,
 ) -> Callable[[AgenticRAGState], dict[str, object]]:
@@ -201,9 +205,7 @@ def make_generate_node(
         state: AgenticRAGState,
     ) -> dict[str, object]:
         question = state["question"]
-        context = "\n---\n".join(
-            doc.page_content for doc in state["documents"]
-        )
+        context = "\n---\n".join(doc.page_content for doc in state["documents"])
 
         # 上次幻覺失敗才算 regenerate
         is_regenerate = not state["hallucination_passed"]
@@ -212,16 +214,16 @@ def make_generate_node(
             regenerate_count += 1
 
         chain = regenerate_chain if is_regenerate else generate_chain
-        generation: str = chain.invoke(
-            {"context": context, "question": question}
-        )
+        generation: str = chain.invoke({"context": context, "question": question})
         print(f"[generate] 生成完成（{len(generation)} 字）")
 
         # 幻覺 grader
-        hall_result: dict[str, object] = hallucination_grader.invoke({
-            "documents": context,
-            "generation": generation,
-        })
+        hall_result: dict[str, object] = hallucination_grader.invoke(
+            {
+                "documents": context,
+                "generation": generation,
+            }
+        )
         hallucination_passed = hall_result["score"] == "yes"
         print(
             f"[generate] 幻覺檢查："
@@ -232,10 +234,12 @@ def make_generate_node(
         # answer grader（短路：幻覺不過就不跑，answer_passed 預設 True）
         answer_passed = True
         if hallucination_passed:
-            ans_result: dict[str, object] = answer_grader.invoke({
-                "question": question,
-                "generation": generation,
-            })
+            ans_result: dict[str, object] = answer_grader.invoke(
+                {
+                    "question": question,
+                    "generation": generation,
+                }
+            )
             answer_passed = ans_result["score"] == "yes"
             print(
                 f"[generate] 回答品質："
