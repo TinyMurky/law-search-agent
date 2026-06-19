@@ -17,6 +17,14 @@ _REWRITE_SYSTEM = """\
 def _make_rewrite_chain(  # type: ignore[no-untyped-def]
     llm: ChatGoogleGenerativeAI,
 ):
+    """建立換角度改寫查詢的 LLM chain。
+
+    Args:
+        llm (ChatGoogleGenerativeAI): 用於改寫查詢的 LLM。
+
+    Returns:
+        Runnable: 輸入 question，輸出改寫後查詢字串的 chain。
+    """
     prompt = ChatPromptTemplate.from_messages([
         ("system", _REWRITE_SYSTEM),
         ("human", "原始問題：{question}\n\n請換個角度改寫："),
@@ -27,7 +35,15 @@ def _make_rewrite_chain(  # type: ignore[no-untyped-def]
 def make_rewrite_query_node(
     llm: ChatGoogleGenerativeAI,
 ) -> Callable[[AgenticRAGState], dict[str, object]]:
-    """建立 rewrite_query 節點，注入 LLM 依賴。"""
+    """建立 rewrite_query 節點，注入 LLM 依賴。
+
+    Args:
+        llm (ChatGoogleGenerativeAI): 節點內 rewrite chain 使用的 LLM。
+
+    Returns:
+        Callable[[AgenticRAGState], dict[str, object]]:
+            rewrite_query 節點函式。
+    """
     rewrite_chain = _make_rewrite_chain(llm)
 
     def rewrite_query_node(

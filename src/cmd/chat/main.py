@@ -19,7 +19,11 @@ _CHROMA_DIR = "data/chroma_db"
 
 
 def _check_chunks(builder: ChunkBuilder) -> None:
-    """Chroma 未建立時提示使用者並中止。"""
+    """Chroma 未建立時提示使用者並中止。
+
+    Args:
+        builder (ChunkBuilder): 用於檢查是否已建立 chunks 的物件。
+    """
     if not builder.is_populated():
         print("⚠️  Chroma DB 尚未建立，請先執行：")
         print("    make build-chunks")
@@ -29,6 +33,14 @@ def _check_chunks(builder: ChunkBuilder) -> None:
 def _load_deps(
     api_key: str | None,
 ) -> tuple[ChunkBuilder, NxLawGraph]:
+    """載入法規資料、建立圖結構與 Chroma chunk_builder。
+
+    Args:
+        api_key (str | None): Gemini API key，傳入 embedding 模型。
+
+    Returns:
+        tuple[ChunkBuilder, NxLawGraph]: 向量搜尋與圖查詢依賴。
+    """
     print("載入法規資料中...", flush=True)
     reader = LawReader(_RAW_DATA)
     laws = reader.load()
@@ -47,6 +59,14 @@ def _load_deps(
 
 
 def _initial_state(question: str) -> dict[str, object]:
+    """建立單次對話的初始 AgenticRAGState。
+
+    Args:
+        question (str): 使用者輸入的問題。
+
+    Returns:
+        dict[str, object]: 可直接傳入 graph.invoke 的初始狀態。
+    """
     return {
         "question": question,
         "intent": "",
@@ -68,6 +88,11 @@ def _initial_state(question: str) -> dict[str, object]:
 
 
 def _chat_loop(graph: CompiledStateGraph) -> None:
+    """啟動互動式對話迴圈，直到使用者輸入 exit。
+
+    Args:
+        graph (CompiledStateGraph): 已編譯的 Self-RAG LangGraph。
+    """
     print("\n法律搜尋 Agent 已啟動（輸入 exit 離開）\n")
     while True:
         try:
@@ -86,6 +111,7 @@ def _chat_loop(graph: CompiledStateGraph) -> None:
 
 
 def main() -> None:
+    """載入依賴、編譯 Graph 並啟動互動式對話迴圈。"""
     load_dotenv()
     api_key = os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY")
 

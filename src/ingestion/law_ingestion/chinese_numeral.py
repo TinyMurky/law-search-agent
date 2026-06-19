@@ -22,13 +22,14 @@ def chinese_to_int(s: str) -> int:
     """將中文數字字串轉換為整數。
 
     Args:
-        s: 中文數字字串，例如「二十二」、「一百零三」、「一千一百七十三」
+        s (str): 中文數字字串，例如「二十二」、「一百零三」、
+            「一千一百七十三」。
 
     Returns:
-        對應的整數
+        int: 對應的整數。
 
     Raises:
-        ValueError: 輸入為空或包含無法辨識的字元
+        ValueError: 輸入為空或包含無法辨識的字元。
     """
     s = s.strip()
     if not s:
@@ -65,7 +66,14 @@ def chinese_to_int(s: str) -> int:
 
 
 def _parse_under_hundred(s: str) -> int:
-    """解析 0–99 的中文數字。"""
+    """解析 0–99 的中文數字。
+
+    Args:
+        s (str): 已去除千位與百位的中文數字字串。
+
+    Returns:
+        int: 對應的整數，s 為空字串時回傳 0。
+    """
     if not s:
         return 0
 

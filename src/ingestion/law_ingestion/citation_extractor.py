@@ -56,6 +56,12 @@ class CitationExtractor:
     """
 
     def __init__(self, law_name_to_pcode: dict[str, str]) -> None:
+        """注入法律名稱與 pcode 的對照表。
+
+        Args:
+            law_name_to_pcode (dict[str, str]): 法律名稱對 pcode
+                的 lookup table，用於辨識跨法律引用。
+        """
         self._lookup = law_name_to_pcode
         self._known_cross_law_re = (
             self._build_known_cross_law_pattern(law_name_to_pcode)
@@ -63,6 +69,10 @@ class CitationExtractor:
 
     def extract_from_law(self, law: Law) -> None:
         """解析整部法律的引用，直接寫入各 Article.cited_articles。
+
+        Args:
+            law (Law): 要解析引用關係的法律，其 articles 會被
+                原地修改。
         """
         ordered = [a for a in law.articles if a.article_type == "A"]
         for article in ordered:
@@ -71,6 +81,16 @@ class CitationExtractor:
     def _extract(
         self, article: Article, ordered: list[Article]
     ) -> _CitedList:
+        """解析單一條文的所有引用，依優先順序套用各規則並去重。
+
+        Args:
+            article (Article): 要解析的條文。
+            ordered (list[Article]): 同法律中依原順序排列的條文
+                清單，供相對引用（前條/次條）定位使用。
+
+        Returns:
+            _CitedList: 去重後的引用清單。
+        """
         content = article.artical_content
         pcode = article.pcode
         consumed: _Consumed = set()
@@ -94,7 +114,17 @@ class CitationExtractor:
     def _extract_range_zhi(
         self, content: str, pcode: str, consumed: _Consumed
     ) -> _CitedList:
-        """範圍引用（至）→ 展開為連續條文。"""
+        """範圍引用（至）→ 展開為連續條文。
+
+        Args:
+            content (str): 條文內容。
+            pcode (str): 條文所屬法律 pcode。
+            consumed (_Consumed): 已消費的文字區間集合，比對後
+                會原地更新。
+
+        Returns:
+            _CitedList: 展開後的引用清單。
+        """
         result: _CitedList = []
         for m in _RANGE_ZHI_RE.finditer(content):
             start = chinese_to_int(m.group(1))
@@ -107,7 +137,17 @@ class CitationExtractor:
     def _extract_range_ji(
         self, content: str, pcode: str, consumed: _Consumed
     ) -> _CitedList:
-        """並列引用（及）→ 各自引用，不展開。"""
+        """並列引用（及）→ 各自引用，不展開。
+
+        Args:
+            content (str): 條文內容。
+            pcode (str): 條文所屬法律 pcode。
+            consumed (_Consumed): 已消費的文字區間集合，比對後
+                會原地更新。
+
+        Returns:
+            _CitedList: 解析後的引用清單。
+        """
         result: _CitedList = []
         for m in _RANGE_JI_RE.finditer(content):
             if self._is_consumed(m, consumed):
@@ -126,7 +166,17 @@ class CitationExtractor:
     def _extract_self_ref(
         self, content: str, pcode: str, consumed: _Consumed
     ) -> _CitedList:
-        """本法自引（本法第X條）。"""
+        """本法自引（本法第X條）。
+
+        Args:
+            content (str): 條文內容。
+            pcode (str): 條文所屬法律 pcode。
+            consumed (_Consumed): 已消費的文字區間集合，比對後
+                會原地更新。
+
+        Returns:
+            _CitedList: 解析後的引用清單。
+        """
         result: _CitedList = []
         for m in _SELF_REF_RE.finditer(content):
             if self._is_consumed(m, consumed):
@@ -141,7 +191,16 @@ class CitationExtractor:
     def _extract_cross_law(
         self, content: str, consumed: _Consumed
     ) -> _CitedList:
-        """已知跨法律引用 — 精準 match lookup 中的法律名稱。"""
+        """已知跨法律引用 — 精準 match lookup 中的法律名稱。
+
+        Args:
+            content (str): 條文內容。
+            consumed (_Consumed): 已消費的文字區間集合，比對後
+                會原地更新。
+
+        Returns:
+            _CitedList: 解析後的引用清單。
+        """
         result: _CitedList = []
         if not self._known_cross_law_re:
             return result
@@ -160,7 +219,13 @@ class CitationExtractor:
     def _consume_unknown_laws(
         self, content: str, consumed: _Consumed
     ) -> None:
-        """未知法律封鎖 — 消費位置，避免 bare ref 誤判。"""
+        """未知法律封鎖 — 消費位置，避免 bare ref 誤判。
+
+        Args:
+            content (str): 條文內容。
+            consumed (_Consumed): 已消費的文字區間集合，會原地
+                更新。
+        """
         for m in _UNKNOWN_LAW_BLOCKER_RE.finditer(content):
             if not self._is_consumed(m, consumed):
                 consumed.add((m.start(), m.end()))
@@ -168,7 +233,16 @@ class CitationExtractor:
     def _extract_bare(
         self, content: str, pcode: str, consumed: _Consumed
     ) -> _CitedList:
-        """裸露引用（第X條，無法律名稱前綴）→ 同法引用。"""
+        """裸露引用（第X條，無法律名稱前綴）→ 同法引用。
+
+        Args:
+            content (str): 條文內容。
+            pcode (str): 條文所屬法律 pcode。
+            consumed (_Consumed): 已消費的文字區間集合。
+
+        Returns:
+            _CitedList: 解析後的引用清單。
+        """
         result: _CitedList = []
         for m in _BARE_RE.finditer(content):
             if self._is_consumed(m, consumed):
@@ -186,7 +260,19 @@ class CitationExtractor:
         pcode: str,
         content: str,
     ) -> _CitedList:
-        """相對引用（前條 / 次條）→ 依條文位置推算。"""
+        """相對引用（前條 / 次條）→ 依條文位置推算。
+
+        Args:
+            article (Article): 要解析的條文。
+            ordered (list[Article]): 同法律中依原順序排列的條文
+                清單。
+            pcode (str): 條文所屬法律 pcode。
+            content (str): 條文內容。
+
+        Returns:
+            _CitedList: 解析後的引用清單，找不到 article 在
+                ordered 中的位置時回傳空清單。
+        """
         result: _CitedList = []
         try:
             idx = next(
@@ -214,6 +300,19 @@ class CitationExtractor:
     def _build_known_cross_law_pattern(
         lookup: dict[str, str],
     ) -> re.Pattern | None:
+        """依 lookup table 建立已知跨法律引用的合併 regex。
+
+        長名稱優先排序，避免短名稱（如「任用法」）提前 match
+        應屬於長名稱（如「公務人員任用法」）的引用。
+
+        Args:
+            lookup (dict[str, str]): 法律名稱對 pcode 的
+                lookup table。
+
+        Returns:
+            re.Pattern | None: 合併後的 regex，lookup 為空時
+                回傳 None。
+        """
         if not lookup:
             return None
         # 長名稱優先，避免短名稱提前 match
@@ -226,4 +325,13 @@ class CitationExtractor:
     def _is_consumed(
         m: re.Match, consumed: _Consumed
     ) -> bool:
+        """判斷 regex match 的起始位置是否已被其他規則消費。
+
+        Args:
+            m (re.Match): 目前的 regex match。
+            consumed (_Consumed): 已消費的文字區間集合。
+
+        Returns:
+            bool: 起始位置落在任一已消費區間內則為 True。
+        """
         return any(s <= m.start() < e for s, e in consumed)

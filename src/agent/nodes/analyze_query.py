@@ -15,6 +15,8 @@ from agent.state import AgenticRAGState, SubQuery
 
 
 class IntentResult(BaseModel):
+    """analyze_query 節點分類問題意圖與複雜度的輸出結構。"""
+
     intent: Literal[
         "lookup",
         "diagnostic",
@@ -48,6 +50,8 @@ class IntentResult(BaseModel):
 
 
 class SubQuerySpec(BaseModel):
+    """單一子查詢的規格，經 _to_sub_query 轉換為 SubQuery。"""
+
     query: str
     strategy: Literal[
         "law:semantic",
@@ -61,6 +65,8 @@ class SubQuerySpec(BaseModel):
 
 
 class DecomposeResult(BaseModel):
+    """analyze_query 節點分解複雜問題後的子查詢清單。"""
+
     sub_queries: list[SubQuerySpec]
 
 
@@ -190,6 +196,14 @@ _REWRITE_SYSTEM = """\
 def _make_intent_chain(
     llm: ChatGoogleGenerativeAI,
 ) -> Runnable:
+    """建立問題意圖與複雜度分類的 LLM chain。
+
+    Args:
+        llm (ChatGoogleGenerativeAI): 用於分類的 LLM。
+
+    Returns:
+        Runnable: 輸入 question，輸出 IntentResult 對應 dict 的 chain。
+    """
     parser = JsonOutputParser(pydantic_object=IntentResult)
     prompt = ChatPromptTemplate.from_messages(
         [
@@ -207,6 +221,15 @@ def _make_intent_chain(
 def _make_decompose_chain(
     llm: ChatGoogleGenerativeAI,
 ) -> Runnable:
+    """建立複雜問題分解為多個子查詢的 LLM chain。
+
+    Args:
+        llm (ChatGoogleGenerativeAI): 用於分解問題的 LLM。
+
+    Returns:
+        Runnable: 輸入 question，輸出 DecomposeResult 對應 dict
+            的 chain。
+    """
     parser = JsonOutputParser(pydantic_object=DecomposeResult)
     prompt = ChatPromptTemplate.from_messages(
         [
@@ -224,6 +247,14 @@ def _make_decompose_chain(
 def _make_hyde_chain(
     llm: ChatGoogleGenerativeAI,
 ) -> Runnable:
+    """建立 HyDE（生成假設條文）的 LLM chain。
+
+    Args:
+        llm (ChatGoogleGenerativeAI): 用於生成假設條文的 LLM。
+
+    Returns:
+        Runnable: 輸入 question，輸出假設條文內容的 chain。
+    """
     prompt = ChatPromptTemplate.from_messages(
         [
             ("system", _HYDE_SYSTEM),
@@ -236,6 +267,14 @@ def _make_hyde_chain(
 def _make_rewrite_chain(  # type: ignore[no-untyped-def]
     llm: ChatGoogleGenerativeAI,
 ):
+    """建立查詢改寫的 LLM chain。
+
+    Args:
+        llm (ChatGoogleGenerativeAI): 用於改寫查詢的 LLM。
+
+    Returns:
+        Runnable: 輸入 question，輸出改寫後查詢內容的 chain。
+    """
     prompt = ChatPromptTemplate.from_messages(
         [
             ("system", _REWRITE_SYSTEM),
@@ -249,6 +288,14 @@ def _make_rewrite_chain(  # type: ignore[no-untyped-def]
 
 
 def _to_sub_query(spec: SubQuerySpec) -> SubQuery:
+    """SubQuerySpec 轉換為 LangGraph State 使用的 SubQuery TypedDict。
+
+    Args:
+        spec (SubQuerySpec): LLM 輸出解析後的子查詢規格。
+
+    Returns:
+        SubQuery: 對應的 TypedDict 實例。
+    """
     return SubQuery(
         query=spec.query,
         strategy=spec.strategy,
@@ -263,7 +310,15 @@ def _to_sub_query(spec: SubQuerySpec) -> SubQuery:
 def make_analyze_query_node(
     llm: ChatGoogleGenerativeAI,
 ) -> Callable[[AgenticRAGState], dict[str, object]]:
-    """建立 analyze_query 節點，注入 LLM 依賴。"""
+    """建立 analyze_query 節點，注入 LLM 依賴。
+
+    Args:
+        llm (ChatGoogleGenerativeAI): 節點內各 chain 共用的 LLM。
+
+    Returns:
+        Callable[[AgenticRAGState], dict[str, object]]: analyze_query
+            節點函式。
+    """
     intent_chain = _make_intent_chain(llm)
     decompose_chain = _make_decompose_chain(llm)
     hyde_chain = _make_hyde_chain(llm)

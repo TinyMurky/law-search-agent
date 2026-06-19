@@ -19,11 +19,12 @@ class LawGraphProtocol(Protocol):
         """通用關係查詢。
 
         Args:
-            node_id:   起點節點 ID
-            relation:  邊的 relation 屬性，e.g. "cites"、"contains"
-            direction: "out" 查出邊終點；"in" 查入邊起點
+            node_id (str): 起點節點 ID。
+            relation (str): 邊的 relation 屬性，例如 "cites"、
+                "contains"。
+            direction (Direction): "out" 查出邊終點，"in" 查入邊起點。
 
         Returns:
-            符合條件的鄰居節點 ID 清單
+            list[str]: 符合條件的鄰居節點 ID 清單。
         """
         ...

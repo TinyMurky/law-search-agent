@@ -8,7 +8,16 @@ from agent.state import AgenticRAGState
 def force_end_node(
     state: AgenticRAGState,
 ) -> dict[str, object]:
-    """達到重試上限時的終止節點，生成誠實的查無結果說明。"""
+    """達到重試上限時的終止節點，生成誠實的查無結果說明。
+
+    Args:
+        state (AgenticRAGState): 目前的 Graph 狀態，取用
+            question 欄位。
+
+    Returns:
+        dict[str, object]: 寫入 generation、halt_reason、messages
+            的 State 更新。
+    """
     question = state["question"]
     generation = (
         f"抱歉，在多次嘗試後仍找不到足夠的相關法律資訊來回答：\n"

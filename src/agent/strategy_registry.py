@@ -19,6 +19,8 @@ StrategyName = Literal[
 # ── Per-strategy 設定 ─────────────────────────────────────────────────
 
 class StrategyConfig(TypedDict):
+    """單一 strategy 的設定，於 STRATEGY_REGISTRY 中查詢。"""
+
     requires_grading: bool
     # 未來可擴充欄位（勿隨意新增，先討論後再加）：
     #   source: str            # "law" | "judgment"

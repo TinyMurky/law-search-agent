@@ -15,6 +15,8 @@ from agent.strategy_registry import STRATEGY_REGISTRY
 # ── Pydantic schema ───────────────────────────────────────────────────
 
 class RelevanceResult(BaseModel):
+    """grade_documents 節點文件相關性評分的輸出結構。"""
+
     score: Literal["yes", "no"] = Field(
         description="此文件是否與問題相關"
     )
@@ -42,6 +44,15 @@ _GRADER_SYSTEM = """\
 def _make_grader_chain(  # type: ignore[no-untyped-def]
     llm: ChatGoogleGenerativeAI,
 ):
+    """建立文件相關性評分（relevance grader）的 LLM chain。
+
+    Args:
+        llm (ChatGoogleGenerativeAI): 用於評分的 LLM。
+
+    Returns:
+        Runnable: 輸入 question 與 document，輸出 RelevanceResult
+            對應 dict 的 chain。
+    """
     parser = JsonOutputParser(pydantic_object=RelevanceResult)
     prompt = ChatPromptTemplate.from_messages([
         ("system", _GRADER_SYSTEM),
@@ -59,7 +70,16 @@ def _make_grader_chain(  # type: ignore[no-untyped-def]
 # ── Routing ───────────────────────────────────────────────────────────
 
 def route_after_grade(state: AgenticRAGState) -> str:
-    """grade_documents 後的路由，供 LangGraph conditional edge 使用。"""
+    """grade_documents 後的路由，供 LangGraph conditional edge 使用。
+
+    Args:
+        state (AgenticRAGState): 目前的 Graph 狀態，取用
+            grade_passed、rewrite_count、max_rewrites 欄位。
+
+    Returns:
+        str: 下一個節點名稱，"generate"、"rewrite_query" 或
+            "force_end"。
+    """
     if state["grade_passed"]:
         return "generate"
     if state["rewrite_count"] < state["max_rewrites"]:
@@ -72,7 +92,15 @@ def route_after_grade(state: AgenticRAGState) -> str:
 def make_grade_documents_node(
     llm: ChatGoogleGenerativeAI,
 ) -> Callable[[AgenticRAGState], dict[str, object]]:
-    """建立 grade_documents 節點，注入 LLM 依賴。"""
+    """建立 grade_documents 節點，注入 LLM 依賴。
+
+    Args:
+        llm (ChatGoogleGenerativeAI): 節點內 grader chain 使用的 LLM。
+
+    Returns:
+        Callable[[AgenticRAGState], dict[str, object]]:
+            grade_documents 節點函式。
+    """
     grader = _make_grader_chain(llm)
 
     def grade_documents_node(

@@ -2,7 +2,11 @@ from langchain_core.tools import BaseTool, tool
 
 
 def make_judgment_tools() -> list[BaseTool]:
-    """Build judgment search tools (placeholder until API is wired up)."""
+    """建立判決書搜尋相關工具（API 尚未串接前的 placeholder）。
+
+    Returns:
+        list[BaseTool]: search_judgments 與 get_judgment 兩個工具。
+    """
 
     @tool
     def search_judgments(query: str) -> str:

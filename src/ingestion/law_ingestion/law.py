@@ -79,7 +79,12 @@ class Law(BaseModel):
 
     @model_validator(mode="after")
     def populate_article_metadata(self) -> "Law":
-        """將 pcode 與 law_name 寫入每個 Article，使條文在脫離 Law 物件後仍能追溯來源法規"""
+        """將 pcode 與 law_name 寫入每個 Article，使條文在脫離
+        Law 物件後仍能追溯來源法規。
+
+        Returns:
+            Law: 已更新 articles 的自身實例（model_validator 慣例）。
+        """
         for article in self.articles:
             article.pcode = self.pcode
             article.law_name = self.law_name

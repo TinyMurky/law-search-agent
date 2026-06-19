@@ -15,6 +15,8 @@ from agent.state import AgenticRAGState
 # ── Pydantic schemas ──────────────────────────────────────────────────
 
 class HallucinationResult(BaseModel):
+    """generate 節點幻覺檢查（hallucination grader）的輸出結構。"""
+
     score: Literal["yes", "no"] = Field(
         description="答案是否完全根據文件（yes=有根據，no=有幻覺）"
     )
@@ -22,6 +24,8 @@ class HallucinationResult(BaseModel):
 
 
 class AnswerResult(BaseModel):
+    """generate 節點答案品質檢查（answer grader）的輸出結構。"""
+
     score: Literal["yes", "no"] = Field(
         description="答案是否真正回答了問題（yes=有回答，no=未完整）"
     )
@@ -77,6 +81,16 @@ def _make_generate_chain(  # type: ignore[no-untyped-def]
     llm: ChatGoogleGenerativeAI,
     system_prompt: str,
 ):
+    """建立依指定 system prompt 生成答案的 LLM chain。
+
+    Args:
+        llm (ChatGoogleGenerativeAI): 用於生成答案的 LLM。
+        system_prompt (str): 套用的 system prompt
+            （一般生成或 regenerate）。
+
+    Returns:
+        Runnable: 輸入 context 與 question，輸出答案字串的 chain。
+    """
     prompt = ChatPromptTemplate.from_messages([
         ("system", system_prompt),
         ("human", "{question}"),
@@ -87,6 +101,15 @@ def _make_generate_chain(  # type: ignore[no-untyped-def]
 def _make_hallucination_grader_chain(  # type: ignore[no-untyped-def]
     llm: ChatGoogleGenerativeAI,
 ):
+    """建立幻覺檢查（hallucination grader）的 LLM chain。
+
+    Args:
+        llm (ChatGoogleGenerativeAI): 用於檢查的 LLM。
+
+    Returns:
+        Runnable: 輸入 documents 與 generation，輸出
+            HallucinationResult 對應 dict 的 chain。
+    """
     parser = JsonOutputParser(pydantic_object=HallucinationResult)
     prompt = ChatPromptTemplate.from_messages([
         ("system", _HALLUCINATION_SYSTEM),
@@ -104,6 +127,15 @@ def _make_hallucination_grader_chain(  # type: ignore[no-untyped-def]
 def _make_answer_grader_chain(  # type: ignore[no-untyped-def]
     llm: ChatGoogleGenerativeAI,
 ):
+    """建立答案品質檢查（answer grader）的 LLM chain。
+
+    Args:
+        llm (ChatGoogleGenerativeAI): 用於檢查的 LLM。
+
+    Returns:
+        Runnable: 輸入 question 與 generation，輸出 AnswerResult
+            對應 dict 的 chain。
+    """
     parser = JsonOutputParser(pydantic_object=AnswerResult)
     prompt = ChatPromptTemplate.from_messages([
         ("system", _ANSWER_SYSTEM),
@@ -121,7 +153,17 @@ def _make_answer_grader_chain(  # type: ignore[no-untyped-def]
 # ── Routing ───────────────────────────────────────────────────────────
 
 def route_after_generate(state: AgenticRAGState) -> str:
-    """generate 後的路由，供 LangGraph conditional edge 使用。"""
+    """generate 後的路由，供 LangGraph conditional edge 使用。
+
+    Args:
+        state (AgenticRAGState): 目前的 Graph 狀態，取用
+            hallucination_passed、answer_passed、regenerate_count、
+            max_regenerates 欄位。
+
+    Returns:
+        str: 下一個節點名稱，"regenerate"、"rewrite_query" 或
+            "finish"。
+    """
     hallucination_passed = state["hallucination_passed"]
     answer_passed = state["answer_passed"]
     regenerate_count = state["regenerate_count"]
@@ -141,7 +183,15 @@ def route_after_generate(state: AgenticRAGState) -> str:
 def make_generate_node(
     llm: ChatGoogleGenerativeAI,
 ) -> Callable[[AgenticRAGState], dict[str, object]]:
-    """建立 generate 節點，注入 LLM 依賴。"""
+    """建立 generate 節點，注入 LLM 依賴。
+
+    Args:
+        llm (ChatGoogleGenerativeAI): 節點內各 chain 共用的 LLM。
+
+    Returns:
+        Callable[[AgenticRAGState], dict[str, object]]: generate
+            節點函式。
+    """
     generate_chain = _make_generate_chain(llm, _GENERATE_SYSTEM)
     regenerate_chain = _make_generate_chain(llm, _REGENERATE_SYSTEM)
     hallucination_grader = _make_hallucination_grader_chain(llm)

@@ -18,6 +18,11 @@ _SAMPLE_QUERY = "侵權行為損害賠償責任"
 
 
 def _load_laws() -> list[Law]:
+    """載入並解析法律資料，包含條文引用關係。
+
+    Returns:
+        list[Law]: 已完成引用解析的法律清單。
+    """
     print("載入法律資料...")
     reader = LawReader(_DATA_PATH)
     laws = reader.load()
@@ -30,12 +35,28 @@ def _load_laws() -> list[Law]:
 
 
 def _build_graph(laws: list[Law]) -> None:
+    """以法律清單建立 NetworkX 圖結構（僅供本範例展示）。
+
+    Args:
+        laws (list[Law]): 已載入的法律清單。
+    """
     print("\n建立圖結構...")
     LawGraphBuilder().build(laws)
     print("圖結構建立完成")
 
 
 def _build_chunks(builder: ChunkBuilder, laws: list[Law], force: bool) -> int:
+    """將法律條文 embed 並存入 Chroma，視 force 決定是否清空重建。
+
+    Args:
+        builder (ChunkBuilder): Chroma chunks collection 的建立與
+            查詢物件。
+        laws (list[Law]): 要建立索引的法律清單。
+        force (bool): True 時先清除舊資料再重新 embed。
+
+    Returns:
+        int: 本次新增的條文數量。
+    """
     if force:
         print("清除舊資料並重新建立 chunks...")
         builder.clear()
@@ -53,6 +74,11 @@ def _build_chunks(builder: ChunkBuilder, laws: list[Law], force: bool) -> int:
 
 
 def _print_peek(builder: ChunkBuilder) -> None:
+    """印出 Chroma 內的條文樣本，供人工確認資料正確性。
+
+    Args:
+        builder (ChunkBuilder): Chroma chunks collection 的查詢物件。
+    """
     print("\n--- Chroma 內的條文樣本 ---")
     for chunk in builder.peek_chunks(3):
         print(f"id: {chunk.to_node_id()}")
@@ -62,6 +88,11 @@ def _print_peek(builder: ChunkBuilder) -> None:
 
 
 def _print_search(builder: ChunkBuilder) -> None:
+    """以範例查詢示範語意搜尋結果。
+
+    Args:
+        builder (ChunkBuilder): Chroma chunks collection 的查詢物件。
+    """
     print(f"\n--- 語意搜尋：「{_SAMPLE_QUERY}」---")
     results = builder.search_chunks(_SAMPLE_QUERY, k=5)
     for i, chunk in enumerate(results, 1):
@@ -75,8 +106,11 @@ def _print_search(builder: ChunkBuilder) -> None:
 
 
 def main() -> None:
+    """執行完整流程：載入法律、建圖、建立並查詢 Chroma chunks。"""
     load_dotenv()
-    parser = argparse.ArgumentParser(description="建立 Chroma chunks collection")
+    parser = argparse.ArgumentParser(
+        description="建立 Chroma chunks collection"
+    )
     parser.add_argument(
         "--force",
         action="store_true",

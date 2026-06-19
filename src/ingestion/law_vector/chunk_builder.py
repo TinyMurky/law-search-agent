@@ -56,6 +56,13 @@ class ChunkBuilder:
     def __init__(
         self, persist_directory: str, embeddings: Embeddings
     ) -> None:
+        """指定 Chroma persist 路徑與 embedding 函式。
+
+        Args:
+            persist_directory (str): Chroma collection 的本地
+                儲存路徑。
+            embeddings (Embeddings): 用於 embed 條文與查詢的模型。
+        """
         self._persist_dir = persist_directory
         self._embeddings = embeddings
         self._col = self._make_col()

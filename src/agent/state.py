@@ -8,11 +8,15 @@ from agent.strategy_registry import StrategyName
 
 
 class LawSearchingState(TypedDict):
+    """Graph 啟動初期使用的最小狀態，login_node 寫入 token。"""
+
     messages: Annotated[list[BaseMessage], add_messages]
     judgment_api_token: str
 
 
 class SubQuery(TypedDict):
+    """analyze_query 節點輸出的單一子查詢，對應一種搜尋策略。"""
+
     query: str
     strategy: StrategyName  # 唯一來源：strategy_registry.StrategyName
     law_name: str | None
@@ -20,6 +24,9 @@ class SubQuery(TypedDict):
 
 
 class AgenticRAGState(TypedDict):
+    """Self-RAG LangGraph 的完整狀態，貫穿 analyze_query 到
+    generate 各節點。"""
+
     # 輸入（整個 Graph 執行期間不變）
     question: str
 

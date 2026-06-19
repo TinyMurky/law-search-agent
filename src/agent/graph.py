@@ -21,7 +21,15 @@ from ingestion.law_vector.chunk_builder import ChunkBuilder
 def _login_node(
     state: AgenticRAGState,
 ) -> dict[str, str]:
-    """Placeholder: 向司法院 API 登入並取得 token。"""
+    """Placeholder: 向司法院 API 登入並取得 token。
+
+    Args:
+        state (AgenticRAGState): 目前的 Graph 狀態（此節點未使用
+            其內容）。
+
+    Returns:
+        dict[str, str]: 寫入 judgment_api_token 欄位的 State 更新。
+    """
     print("[login] 司法院 API 登入（placeholder）")
     return {"judgment_api_token": ""}
 
@@ -31,7 +39,17 @@ def build_graph(
     chunk_builder: ChunkBuilder,
     law_graph: NxLawGraph,
 ) -> CompiledStateGraph:
-    """組裝並編譯 Self-RAG LangGraph。"""
+    """組裝並編譯 Self-RAG LangGraph。
+
+    Args:
+        llm (ChatGoogleGenerativeAI): 注入各節點使用的 LLM。
+        chunk_builder (ChunkBuilder): 注入 retrieve 節點的向量
+            搜尋依賴。
+        law_graph (NxLawGraph): 注入 retrieve 節點的圖查詢依賴。
+
+    Returns:
+        CompiledStateGraph: 編譯完成、可直接 invoke 的 LangGraph。
+    """
     builder: StateGraph = StateGraph(AgenticRAGState)
 
     # ── 節點 ──────────────────────────────────────────────────────────

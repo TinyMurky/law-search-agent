@@ -12,6 +12,11 @@ _DATA_PATH = Path("raw_data/laws/ChLaw.json")
 
 
 def _print_stats(laws: list[Law]) -> None:
+    """印出法律、條文與引用關係的數量統計。
+
+    Args:
+        laws (list[Law]): 已完成引用解析的法律清單。
+    """
     total_articles = sum(
         1
         for law in laws
@@ -32,7 +37,15 @@ def _print_stats(laws: list[Law]) -> None:
 def _find_sample(
     laws: list[Law],
 ) -> tuple[str, str, str] | None:
-    """找第一個有引用關係的條文，回傳 (law_name, pcode, article_no)。"""
+    """找第一個有引用關係的條文。
+
+    Args:
+        laws (list[Law]): 已完成引用解析的法律清單。
+
+    Returns:
+        tuple[str, str, str] | None: (law_name, pcode, article_no)，
+            找不到時回傳 None。
+    """
     for law in laws:
         for article in law.articles:
             has_cite = (
@@ -47,6 +60,12 @@ def _find_sample(
 def _print_graph_demo(
     laws: list[Law], graph: NxLawGraph
 ) -> None:
+    """印出圖查詢示範：條文數量、引用與被引用關係。
+
+    Args:
+        laws (list[Law]): 已完成引用解析的法律清單。
+        graph (NxLawGraph): 已建立的法規圖。
+    """
     sample = _find_sample(laws)
     if not sample:
         print("找不到有引用關係的條文")
@@ -66,6 +85,7 @@ def _print_graph_demo(
 
 
 def main() -> None:
+    """載入法律資料、解析引用、建圖並印出示範結果。"""
     print("載入法律資料...")
     reader = LawReader(_DATA_PATH)
     laws = reader.load()

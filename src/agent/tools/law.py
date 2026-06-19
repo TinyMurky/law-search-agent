@@ -13,7 +13,16 @@ def make_law_tools(
     chunk_builder: ChunkBuilder,
     law_graph: NxLawGraph,
 ) -> list[BaseTool]:
-    """Build law search tools with injected DB dependencies."""
+    """建立法條搜尋相關工具，注入 DB 依賴。
+
+    Args:
+        chunk_builder (ChunkBuilder): 注入語意搜尋工具的向量搜尋依賴。
+        law_graph (NxLawGraph): 注入圖查詢工具的圖查詢依賴。
+
+    Returns:
+        list[BaseTool]: search_law_articles、get_related_articles、
+            get_law_articles、get_article 四個工具。
+    """
 
     @tool
     def search_law_articles(query: str) -> str:
