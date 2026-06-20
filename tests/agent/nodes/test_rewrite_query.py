@@ -64,7 +64,7 @@ def test_documents_cleared(llm: MagicMock) -> None:
     assert result["documents"] == []
 
 
-def test_uses_graph_expand_strategy(llm: MagicMock) -> None:
+def test_uses_semantic_strategy(llm: MagicMock) -> None:
     mock_chain = MagicMock()
     mock_chain.invoke.return_value = "改寫後的查詢"
 
@@ -74,7 +74,7 @@ def test_uses_graph_expand_strategy(llm: MagicMock) -> None:
 
     queries = result["rewritten_queries"]
     assert len(queries) == 1
-    assert queries[0]["strategy"] == "law:graph_expand"
+    assert queries[0]["strategy"] == "law:semantic"
 
 
 def test_rewritten_query_from_chain(llm: MagicMock) -> None:
