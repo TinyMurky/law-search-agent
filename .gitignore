@@ -7,3 +7,4 @@ raw_data/
 .pytest_cache/
 chroma_db/
 .claude_session
+.claude/skills/law-agent-e2e-eval/runs/

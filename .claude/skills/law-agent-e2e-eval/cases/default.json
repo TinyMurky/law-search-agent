@@ -1,0 +1,127 @@
+{
+  "description": "law-agent-e2e-eval 預設測試集，涵蓋每種 retrieve 策略、口語法律名稱正規化（單一候選／歧義候選／完全找不到）、rewrite/force_end 控制流程，以及 judgment:tavily placeholder。questions/predicted 都已用真實 raw_data/laws/ChLaw.json 資料核對過（見各案例 notes），不是憑空編的。",
+  "cases": [
+    {
+      "id": "direct_lookup_prefix",
+      "question": "刑法第271條規定的殺人罪是什麼？",
+      "predicted": {
+        "intent": "lookup",
+        "complexity": "simple",
+        "retrieve_strategies": ["law:direct_lookup"],
+        "rewrite_expected": false,
+        "force_end_expected": false,
+        "notes": "「刑法」非正統名稱，resolve_law_names 第二層前綴規則命中「中華民國刑法」（已用真實資料確認，刑法 substring 命中 4 筆但「中華民國刑法」精確比對優先），單一候選不會走 ambiguous 分支。direct_lookup 的 requires_grading=False，grade_documents 仍會印出彙總的『保留 N/M 個文件』（trace.json 的 grade_results 會有值，這是正常的，N/M 預期等於文件數，因為是跳過評分直接全部視為相關，不是沒有經過 grade_documents 節點），但 raw_log.txt 裡每筆 chunk 的逐筆訊息應該是『（跳過）』而不是『相關/不相關』的評分——這個細節 trace.json 沒有獨立欄位記錄，需要的話回頭看 raw_log.txt。"
+      },
+      "expected_answer": {
+        "must_not_include": ["根據你提供的條文", "根據以上條文"],
+        "should_mention": ["殺人"],
+        "notes": "第一段直接回答殺人罪構成要件與法律效果，第二段列出中華民國刑法第271條原文。"
+      }
+    },
+    {
+      "id": "direct_lookup_no_prefix_needed",
+      "question": "民法第184條的侵權行為規定是什麼？",
+      "predicted": {
+        "intent": "lookup",
+        "complexity": "simple",
+        "retrieve_strategies": ["law:direct_lookup"],
+        "rewrite_expected": false,
+        "force_end_expected": false,
+        "notes": "「民法」本身就是正統名稱，resolve_law_names 第一層 exact match 直接命中，不需要前綴規則。這是修改前就能正常運作的案例，當作 baseline sanity check：確認新增的名稱正規化邏輯沒有把『本來就對』的案例改壞。"
+      },
+      "expected_answer": {
+        "must_not_include": ["根據你提供的條文", "根據以上條文"],
+        "should_mention": ["故意", "過失", "侵權"],
+        "notes": "第一段說明侵權責任成立要件，第二段列出民法第184條原文。"
+      }
+    },
+    {
+      "id": "direct_lookup_ambiguous",
+      "question": "登記法第1條規定什麼？",
+      "predicted": {
+        "intent": "lookup",
+        "complexity": "simple",
+        "retrieve_strategies": [
+          "law:direct_lookup_ambiguous",
+          "law:direct_lookup_ambiguous"
+        ],
+        "rewrite_expected": false,
+        "force_end_expected": false,
+        "notes": "已用真實資料確認 substring 命中剛好 2 筆：「商業登記法」「船舶登記法」，會拆成 2 筆 law:direct_lookup_ambiguous 候選查詢，這兩筆 requires_grading=True，所以這題應該會看到 [grade] Chunk 逐筆評分的訊號（跟前兩個案例不同）。"
+      },
+      "expected_answer": {
+        "must_not_include": ["根據你提供的條文", "根據以上條文"],
+        "should_mention": [],
+        "notes": "重點驗證『有沒有真的拆成 2 筆候選查詢』，不強求 grading 一定選對是哪一部法律——原始問題本身就沒講清楚要問哪一部，含糊或只挑出其中一部都算合理，但不該完全沒有任何法條依據就直接說找不到。"
+      }
+    },
+    {
+      "id": "unresolved_law_name_force_end",
+      "question": "外星人保護法第5條規定什麼？",
+      "predicted": {
+        "intent": "lookup",
+        "complexity": "simple",
+        "retrieve_strategies": ["law:direct_lookup"],
+        "rewrite_expected": true,
+        "force_end_expected": true,
+        "notes": "「外星人保護法」在真實資料中完全不存在，resolve_law_names 回傳 0 候選，依設計保留原始名稱繼續走 law:direct_lookup（不是新行為的退化，是刻意維持向後相容）。retrieve 會印出『找不到 pcode』，documents 為空，grade_documents 必然 grade_passed=False，觸發 rewrite_query；因為這部法律真的不存在，重寫後再查還是找不到，預期會一路用完 max_rewrites 次數後進 force_end。"
+      },
+      "expected_answer": {
+        "must_not_include": ["第5條規定", "第 5 條規定"],
+        "should_mention": ["找不到", "抱歉"],
+        "notes": "誠實回答找不到相關資訊，絕對不能編造一部不存在法律的條文內容（幻覺）。"
+      }
+    },
+    {
+      "id": "diagnostic_graph_expand",
+      "question": "我借錢給朋友，他不還錢，我可以怎麼辦？",
+      "predicted": {
+        "intent": "diagnostic",
+        "complexity": "simple",
+        "retrieve_strategies": ["law:graph_expand"],
+        "rewrite_expected": false,
+        "force_end_expected": false,
+        "notes": "描述情境、找對應法條的典型 diagnostic 案例，只有一個面向應判為 simple，固定走 law:graph_expand（語意搜尋後展開引用鏈），requires_grading=True。"
+      },
+      "expected_answer": {
+        "must_not_include": ["根據你提供的條文", "根據以上條文"],
+        "should_mention": ["返還", "請求"],
+        "notes": "第一段說明可主張的請求權方向（例如消費借貸返還請求權），第二段列出對應民法條文原文。"
+      }
+    },
+    {
+      "id": "comparison_decompose",
+      "question": "民法和刑法對於故意傷害他人的規定有什麼不同？",
+      "predicted": {
+        "intent": "comparison",
+        "complexity": "complex",
+        "retrieve_strategies": null,
+        "rewrite_expected": false,
+        "force_end_expected": false,
+        "notes": "intent=comparison 必定走 decompose_chain（不管 complexity 判斷結果如何），預期拆成至少 2 筆子查詢，一筆關於民法侵權賠償、一筆關於刑法傷害罪。若 decompose 選到 law:direct_lookup 且 law_name 填『刑法』，應該會被本次新增的正規化邏輯解析成『中華民國刑法』——這題同時驗證 decompose 路徑下的子查詢數量與名稱正規化是否生效，retrieve_strategies 留 null 是因為 LLM 分解結果每次可能不完全一樣（law:semantic/law:hyde/law:direct_lookup 都合理），重點看子查詢數量 >= 2 且涵蓋民法與刑法兩個面向。"
+      },
+      "expected_answer": {
+        "must_not_include": ["根據你提供的條文", "根據以上條文"],
+        "should_mention": ["民事", "刑事"],
+        "notes": "第一段需分別說明民法（民事賠償責任）與刑法（傷害罪刑責）的差異，第二段列出兩部法律對應條文原文。"
+      }
+    },
+    {
+      "id": "judgment_tavily_placeholder",
+      "question": "有沒有關於酒駕肇事的判決案例？",
+      "predicted": {
+        "intent": "diagnostic",
+        "complexity": "simple",
+        "retrieve_strategies": ["law:graph_expand", "judgment:tavily"],
+        "rewrite_expected": false,
+        "force_end_expected": false,
+        "notes": "has_judgment_request 應為 True（問題出現『判決』『案例』），會在主策略之外額外補上 judgment:tavily 子查詢。judgment:tavily 目前只是 placeholder（retrieve.py 印出『judgment:tavily（placeholder）』，不會真的回傳判決書），所以這題主要驗證『有沒有正確補上判決書子查詢』，不是驗證判決書內容本身。"
+      },
+      "expected_answer": {
+        "must_not_include": ["判決案號", "最高法院.*號判決"],
+        "should_mention": [],
+        "notes": "因為判決書查詢還是 placeholder，回答不應該編造具體判決案號或案例內容；如果模型誠實表示判決書查詢功能尚未完整，或只聚焦在相關法條（如刑法公共危險罪相關條文），都算合理。"
+      }
+    }
+  ]
+}
