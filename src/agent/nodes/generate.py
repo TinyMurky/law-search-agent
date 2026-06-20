@@ -205,7 +205,8 @@ def make_generate_node(
         state: AgenticRAGState,
     ) -> dict[str, object]:
         question = state["question"]
-        context = "\n---\n".join(doc.page_content for doc in state["documents"])
+        texts = (doc.page_content for doc in state["documents"])
+        context = "\n---\n".join(texts)
 
         # 上次幻覺失敗才算 regenerate
         is_regenerate = not state["hallucination_passed"]
@@ -214,7 +215,8 @@ def make_generate_node(
             regenerate_count += 1
 
         chain = regenerate_chain if is_regenerate else generate_chain
-        generation: str = chain.invoke({"context": context, "question": question})
+        payload = {"context": context, "question": question}
+        generation: str = chain.invoke(payload)
         print(f"[generate] 生成完成（{len(generation)} 字）")
 
         # 幻覺 grader
