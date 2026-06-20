@@ -21,7 +21,7 @@ class HallucinationResult(BaseModel):
     score: Literal["yes", "no"] = Field(
         description="答案是否完全根據文件（yes=有根據，no=有幻覺）"
     )
-    reason: str = Field(description="一句話說明判斷依據")
+    reason: str = Field(description="如果有幻覺，指出哪個具體聲明沒有根據")
 
 
 class AnswerResult(BaseModel):
@@ -30,7 +30,9 @@ class AnswerResult(BaseModel):
     score: Literal["yes", "no"] = Field(
         description="答案是否真正回答了問題（yes=有回答，no=未完整）"
     )
-    missing: str = Field(description="缺少什麼資訊（若有回答則填 none）")
+    missing: str = Field(
+        description="如果 no，說明缺少了什麼；如果 yes，說明哪個部分解決了問題"
+    )
 
 
 # ── Prompts ───────────────────────────────────────────────────────────
@@ -73,13 +75,18 @@ _REGENERATE_SYSTEM = """\
 {context}"""
 
 _HALLUCINATION_SYSTEM = """\
-你是一個法律答案查核員。
-判斷給定的「答案」中，所引用或陳述的法律資訊是否有條文根據。
+你是一個法律答案幻覺檢查員。
+判斷AI給定的「答案」中，所引用或陳述的法律資訊是否都基於給定的文件與法條,
+沒有自行添加文件中不存在的資訊。
 
-評分規則：
+評估方法：逐句檢視 AI 回答中的具體聲明（數字、名稱、限制條件、法律專有名詞），
+確認每一個聲明在文件中都能找到直接依據。
+
+判斷規則：
 - "yes"：答案的法律資訊可在條文中找到依據
   （允許說明句、引導句等語言框架，如「根據條文...」「民法第X條規定...」）
 - "no" ：答案包含條文中沒有依據的法律聲明或事實推測
+- "yes": 當回答說「找不到相關資訊」時可以當作 yes 通過, 因為誠實回答不算幻覺
 
 {format_instructions}
 只輸出 JSON，不要其他文字。"""
@@ -90,7 +97,9 @@ _ANSWER_SYSTEM = """\
 
 評分規則：
 - "yes"：答案確實回答了問題的核心
+- "yes"：回答說 "找不到相關資訊" (因為誠實所以通過)
 - "no" ：答案沒有回答問題，或嚴重缺少關鍵資訊
+- "no" ：問題包含多個子問題，但回答只覆蓋了一部分
 
 {format_instructions}
 只輸出 JSON，不要其他文字。"""
@@ -138,7 +147,7 @@ def _make_hallucination_grader_chain(
     prompt = ChatPromptTemplate.from_messages(
         [
             ("system", _HALLUCINATION_SYSTEM),
-            ("human", "條文內容：{documents}\n\n答案：{generation}"),
+            ("human", "法律文件：{documents}\n\n答案：{generation}"),
         ]
     )
     return (
@@ -164,7 +173,7 @@ def _make_answer_grader_chain(
     prompt = ChatPromptTemplate.from_messages(
         [
             ("system", _ANSWER_SYSTEM),
-            ("human", "問題：{question}\n\n答案：{generation}"),
+            ("human", "使用者問題：{question}\n\n答案：{generation}"),
         ]
     )
     return (
