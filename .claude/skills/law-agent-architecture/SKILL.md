@@ -77,7 +77,7 @@ Phase 2 的核心變化：Chroma + NetworkX 兩套系統統一換成一套 Neo4j
 |---|---|
 | `references/mcp-layer.md` | MCP Server：工具定義、串流代理、Streamable-HTTP 設定 |
 | `references/api-layer.md` | FastAPI：endpoint 列表、SSE 串流寫法、與 Agent 的呼叫方式 |
-| `references/agent-layer.md` | LangGraph Agent：State、Graph 流程、Tools 清單 |
+| `references/agent-layer.md` | **已過時，請改看 `law-rag-agent` skill**（State、Graph 流程、節點、Strategy Registry 的現行設計都在那裡）|
 | `references/db-layer.md` | DB Layer：Chroma + NetworkX（Phase 1）→ Neo4j（Phase 2） |
 
 ---
