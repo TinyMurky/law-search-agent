@@ -213,6 +213,50 @@ def test_get_law_returns_none_for_article_node(
     assert graph_with_attrs.get_law("B0000001#第 184 條") is None
 
 
+# --- get_all_law_names ---
+
+def test_get_all_law_names_returns_sorted_names() -> None:
+    G: nx.DiGraph = nx.DiGraph()
+    G.add_node("C0000001", type="law", law_name="刑法")
+    G.add_node("B0000001", type="law", law_name="民法")
+    G.add_node("A0000001", type="law", law_name="憲法")
+    G.add_node("B0000001#第 1 條", type="article")
+    graph = NxLawGraph(G)
+
+    names = graph.get_all_law_names()
+    assert names == sorted(["刑法", "民法", "憲法"])
+
+
+def test_get_all_law_names_excludes_article_nodes() -> None:
+    G: nx.DiGraph = nx.DiGraph()
+    G.add_node("B0000001", type="law", law_name="民法")
+    G.add_node("B0000001#第 1 條", type="article")
+    graph = NxLawGraph(G)
+
+    assert graph.get_all_law_names() == ["民法"]
+
+
+def test_get_all_law_names_empty_graph_returns_empty_list() -> None:
+    G: nx.DiGraph = nx.DiGraph()
+    graph = NxLawGraph(G)
+
+    assert graph.get_all_law_names() == []
+
+
+def test_get_all_law_names_caches_result() -> None:
+    G: nx.DiGraph = nx.DiGraph()
+    G.add_node("B0000001", type="law", law_name="民法")
+    graph = NxLawGraph(G)
+
+    first = graph.get_all_law_names()
+    G.add_node("C0000001", type="law", law_name="刑法")
+    second = graph.get_all_law_names()
+
+    # 第二次呼叫應回傳快取結果，不會反映新增的節點
+    assert first == ["民法"]
+    assert second == ["民法"]
+
+
 # --- get_article ---
 
 def test_get_article_returns_tuple(

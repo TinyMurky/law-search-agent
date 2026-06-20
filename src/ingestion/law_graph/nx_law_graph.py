@@ -28,6 +28,9 @@ class NxLawGraph:
         """
         self._G = G
 
+        # 所有法規的正式名稱
+        self._law_names: list[str] = []
+
     def get_related(
         self,
         node_id: str,
@@ -74,9 +77,7 @@ class NxLawGraph:
         """
         return [nid for nid, _ in self.get_cited_with_edges(pcode, article_no)]
 
-    def get_citing_articles(
-        self, pcode: str, article_no: str
-    ) -> list[str]:
+    def get_citing_articles(self, pcode: str, article_no: str) -> list[str]:
         """回傳引用此條文的所有條文（cites 入邊）。
 
         Args:
@@ -136,6 +137,23 @@ class NxLawGraph:
             return None
         return cast(LawNodeAttrs, node)
 
+    def get_all_law_names(self) -> list[str]:
+        """回覆整本法規的各正式法律名稱。
+
+        Returns:
+            list[str]: 中華民國各法規的正式名稱。
+        """
+        if len(self._law_names) > 0:
+            return self._law_names
+
+        self._law_names = sorted(
+            attrs["law_name"]
+            for _, attrs in self._G.nodes(data=True)
+            if attrs.get("type") == "law"
+        )
+
+        return self._law_names
+
     def get_article(
         self, pcode: str, article_no: str
     ) -> tuple[str, ArticleNodeAttrs] | None:
@@ -159,7 +177,9 @@ class NxLawGraph:
         return node_id, cast(ArticleNodeAttrs, node)
 
     def get_edge(
-        self, u: str, v: str
+        self,
+        u: str,
+        v: str,
     ) -> ContainsEdgeAttrs | CitesEdgeAttrs | None:
         """取出兩節點之間的邊屬性，不存在回傳 None。
 
