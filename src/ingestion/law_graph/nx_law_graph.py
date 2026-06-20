@@ -295,3 +295,31 @@ class NxLawGraph:
             if is_law and same_name:
                 return str(node_id)
         return None
+
+    def resolve_law_names(self, law_name: str) -> list[str]:
+        """將口語化法律名稱解析為候選正統名稱清單。
+
+        依序嘗試：完全相符 → 補「中華民國」前綴完全相符 →
+        substring 篩選候選。回傳 0 筆代表完全找不到，1 筆代表
+        唯一候選，2 筆以上代表名稱有歧義，呼叫端可視需要拆成
+        多個查詢分別處理。
+
+        Args:
+            law_name (str): 使用者輸入或 LLM 解析出的法律名稱，
+                可能是正統名稱或口語簡稱，例如「刑法」。
+
+        Returns:
+            list[str]: 候選的正統法律名稱清單。
+        """
+        if not law_name:
+            return []
+
+        all_names = self.get_all_law_names()
+        if law_name in all_names:
+            return [law_name]
+
+        prefixed = f"中華民國{law_name}"
+        if prefixed in all_names:
+            return [prefixed]
+
+        return [n for n in all_names if law_name in n]

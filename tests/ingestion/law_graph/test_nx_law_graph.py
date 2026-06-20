@@ -257,6 +257,52 @@ def test_get_all_law_names_caches_result() -> None:
     assert second == ["民法"]
 
 
+# --- resolve_law_names ---
+
+def test_resolve_law_names_exact_match() -> None:
+    G: nx.DiGraph = nx.DiGraph()
+    G.add_node("B0000001", type="law", law_name="民法")
+    graph = NxLawGraph(G)
+
+    assert graph.resolve_law_names("民法") == ["民法"]
+
+
+def test_resolve_law_names_prefix_heuristic() -> None:
+    G: nx.DiGraph = nx.DiGraph()
+    G.add_node("C0000001", type="law", law_name="中華民國刑法")
+    G.add_node("C0000002", type="law", law_name="中華民國刑法施行法")
+    G.add_node("C0000003", type="law", law_name="陸海空軍刑法")
+    graph = NxLawGraph(G)
+
+    assert graph.resolve_law_names("刑法") == ["中華民國刑法"]
+
+
+def test_resolve_law_names_multiple_candidates() -> None:
+    G: nx.DiGraph = nx.DiGraph()
+    G.add_node("D0000001", type="law", law_name="商業登記法施行細則")
+    G.add_node("D0000002", type="law", law_name="土地登記法")
+    graph = NxLawGraph(G)
+
+    candidates = graph.resolve_law_names("登記法")
+    assert set(candidates) == {"商業登記法施行細則", "土地登記法"}
+
+
+def test_resolve_law_names_no_match_returns_empty() -> None:
+    G: nx.DiGraph = nx.DiGraph()
+    G.add_node("B0000001", type="law", law_name="民法")
+    graph = NxLawGraph(G)
+
+    assert graph.resolve_law_names("不存在的法律") == []
+
+
+def test_resolve_law_names_empty_input_returns_empty() -> None:
+    G: nx.DiGraph = nx.DiGraph()
+    G.add_node("B0000001", type="law", law_name="民法")
+    graph = NxLawGraph(G)
+
+    assert graph.resolve_law_names("") == []
+
+
 # --- get_article ---
 
 def test_get_article_returns_tuple(

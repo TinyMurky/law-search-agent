@@ -53,7 +53,7 @@ def build_graph(
     builder: StateGraph = StateGraph(AgenticRAGState)
 
     # ── 節點 ──────────────────────────────────────────────────────────
-    _analyze = make_analyze_query_node(llm)
+    _analyze = make_analyze_query_node(llm, law_graph)
     _retrieve = make_retrieve_node(chunk_builder, law_graph)
     _grade = make_grade_documents_node(llm)
     _generate = make_generate_node(llm)

@@ -11,6 +11,7 @@ StrategyName = Literal[
     "law:semantic",
     "law:hyde",
     "law:direct_lookup",
+    "law:direct_lookup_ambiguous",
     "law:graph_expand",
     "judgment:tavily",
 ]
@@ -35,6 +36,9 @@ STRATEGY_REGISTRY: dict[str, StrategyConfig] = {
     "law:hyde":          {"requires_grading": True},
     # 使用者明確指定條號，不需判斷相關性
     "law:direct_lookup": {"requires_grading": False},
+    # 法律名稱解析出多個候選（口語名稱對應不只一個正統名稱）時，
+    # 每個候選各自查一次，靠 grading 篩掉猜錯的候選
+    "law:direct_lookup_ambiguous": {"requires_grading": True},
     # Chroma 搜尋 + 引用展開，兩類文件均需 LLM 判斷
     "law:graph_expand":  {"requires_grading": True},
     # Tavily 搜尋判決書（placeholder）

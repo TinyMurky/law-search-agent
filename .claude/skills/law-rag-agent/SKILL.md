@@ -92,12 +92,13 @@ class SubQuery(TypedDict):
     strategy: Literal[
         "law:semantic",       # Chroma 語意搜尋
         "law:hyde",           # HyDE 再語意搜尋（query 已是假設條文）
-        "law:direct_lookup",  # Graph 直接查節點（已知條號）
+        "law:direct_lookup",  # Graph 直接查節點（已知條號，名稱已解析為單一候選）
+        "law:direct_lookup_ambiguous",  # 同上，但名稱有多個候選（見下）
         "law:graph_expand",   # 語意搜尋 + Graph 遍歷引用鏈
         "judgment:tavily",    # Tavily + 司法院 API（placeholder）
     ]
-    law_name: str | None    # 只有 law:direct_lookup 時有值，如「民法」
-    article_no: str | None  # 只有 law:direct_lookup 時有值，如「第 184 條」
+    law_name: str | None    # 只有 direct_lookup 系列時有值，如「民法」
+    article_no: str | None  # 只有 direct_lookup 系列時有值，如「第 184 條」
 ```
 
 > **設計決策**：用 `"law:semantic"` 字串而非 `tuple["law", "semantic"]`，
@@ -183,11 +184,44 @@ class AgenticRAGState(TypedDict):
 
 | strategy | 觸發條件 | retrieve 做什麼 | 使用函式 |
 |---|---|---|---|
-| `law:semantic` | procedural / simple lookup（無條號）的 fallback | Chroma 語意搜尋 | `chunk_builder.search(query)` |
-| `law:hyde` | lookup 無條號（概念型） | query 已是 HyDE 假設條文，直接 Chroma 搜尋 | `chunk_builder.search(query)` |
-| `law:direct_lookup` | lookup 有具體法律名稱 + 條號 | Graph 直接查節點 | `law_graph.get_node(f"{pcode}#{article_no}")` |
-| `law:graph_expand` | diagnostic | Chroma 搜尋 → 取出 article_no → Graph 遍歷引用鏈 | `chunk_builder.search()` + `law_graph.get_cited_with_edges()` |
+| `law:semantic` | procedural / simple lookup（無條號）的 fallback | Chroma 語意搜尋 | `chunk_builder.search_chunks(query)` |
+| `law:hyde` | lookup 無條號（概念型） | query 已是 HyDE 假設條文，直接 Chroma 搜尋 | `chunk_builder.search_chunks(query)` |
+| `law:direct_lookup` | lookup 有具體法律名稱 + 條號，名稱已正規化為單一正統名稱 | Graph 直接查節點 | `law_graph.find_pcode_by_name()` + `law_graph.get_article()` |
+| `law:direct_lookup_ambiguous` | 同上，但名稱正規化後有 2 個以上候選 | 與 `law:direct_lookup` 走相同程式碼路徑，差別只在 `requires_grading=True` | 同上 |
+| `law:graph_expand` | diagnostic | Chroma 搜尋 → 取出 article_no → Graph 遍歷引用鏈 | `chunk_builder.search_chunks()` + `law_graph.get_cited_with_edges()` |
 | `judgment:tavily` | 問題提到判決/裁判/案例 | Tavily 搜尋 → 司法院 API 取全文 | placeholder |
+
+### 法律名稱正規化（口語簡稱 → 正統名稱）
+
+使用者或 LLM 解析出的 `law_name` 常是口語簡稱（如「刑法」），
+但全國法規資料庫的正式名稱可能帶「中華民國」前綴（如「中華民國刑法」），
+`find_pcode_by_name` 是完全字串相等比對，簡稱會直接查不到。
+
+**正規化在 `analyze_query` 節點內完成**（`_resolve_direct_lookup_specs`），
+在 LLM 解析出 `law_name` 後立刻呼叫
+`law_graph.resolve_law_names(law_name)`，依序嘗試：
+
+1. 完全相符（已經是正統名稱，例如「民法」）
+2. 補「中華民國」前綴完全相符（例如「刑法」→「中華民國刑法」）
+3. substring 篩選候選（例如「登記法」可能同時命中
+   「商業登記法施行細則」「土地登記法」）
+
+依候選數量決定產出：
+
+- **0 個候選**：保留原始名稱，產出 1 筆 `law:direct_lookup`
+  （行為與正規化加入前相同，後續查詢照舊失敗）
+- **1 個候選**：直接採用該正統名稱，產出 1 筆 `law:direct_lookup`
+- **2 個以上候選（歧義）**：每個候選各自產出 1 筆
+  `law:direct_lookup_ambiguous`，交由 `grade_documents`
+  依使用者原始問題篩掉猜錯的候選（不額外呼叫 LLM 消歧）
+
+**為何不用 LLM 消歧**：把全部 1343 個法律名稱丟給 LLM 選擇成本太高；
+規則已能解決絕大多數「省略中華民國前綴」的情況，真正歧義的情況
+（多個候選）改用既有的 `grade_documents` 機制過濾，不必新增一次
+額外的 LLM 呼叫。
+
+`make_analyze_query_node(llm, law_graph)` 因此多了 `law_graph` 依賴，
+`build_graph()` 注入時與 `make_retrieve_node` 共用同一個 `law_graph` 實例。
 
 ### HyDE 在哪裡生成
 
@@ -218,6 +252,11 @@ HyDE 假設文件在 `analyze_query` 節點生成（LLM 呼叫），
 2. `STRATEGY_REGISTRY` 加入對應的 `StrategyConfig`
 3. `retrieve.py` 加入 `if/elif` 分支（retrieval 實作）
 4. `analyze_query.py` prompt 更新（告知 LLM 新 strategy）
+
+> **例外：`law:direct_lookup_ambiguous`** 不需要步驟 4。
+> 這個 strategy 不是 LLM 直接選的，而是 `analyze_query` 在
+> LLM 輸出 `law:direct_lookup` 之後，由 `_resolve_direct_lookup_specs`
+> 依候選數量在後處理階段改寫 strategy，prompt 完全不用知道它存在。
 
 ### 目前 StrategyConfig 欄位
 
@@ -262,6 +301,10 @@ grade_passed=False 且 rewrite_count >= max_rewrites         → "force_end"
 `grade_documents.py` 查詢 `STRATEGY_REGISTRY["requires_grading"]`，
 `False` 的 strategy 自動放行。
 `retrieve` 在 Document metadata 帶入 `"strategy"` 欄位供此處使用。
+
+**`law:direct_lookup_ambiguous` 例外**：法律名稱有多個候選時，
+`requires_grading=True`，讓 grader 依使用者原始問題篩掉猜錯的候選
+（見上方「法律名稱正規化」一節）。
 
 **chunk grade vs graph grade**：不需區分。
 `law:graph_expand` 產出的 Chroma 語意結果和引用展開結果

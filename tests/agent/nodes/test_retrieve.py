@@ -144,6 +144,31 @@ def test_direct_lookup_found_returns_document(
     assert docs[0].metadata["article_no"] == "第 184 條"
 
 
+def test_direct_lookup_ambiguous_routes_like_direct_lookup(
+    mock_builder: MagicMock, mock_graph: MagicMock
+) -> None:
+    mock_graph.find_pcode_by_name.return_value = "B0000001"
+    mock_graph.get_article.return_value = (
+        "B0000001#第 184 條",
+        _article_node(),
+    )
+    node = make_retrieve_node(mock_builder, mock_graph)
+    result = node(
+        _state(
+            [
+                _sub_query(
+                    "", "law:direct_lookup_ambiguous", "民法", "第 184 條"
+                )
+            ]
+        )
+    )
+
+    mock_graph.get_article.assert_called_once_with("B0000001", "第 184 條")
+    docs = result["documents"]
+    assert len(docs) == 1
+    assert docs[0].metadata["strategy"] == "law:direct_lookup_ambiguous"
+
+
 def test_direct_lookup_pcode_not_found_returns_empty(
     mock_builder: MagicMock, mock_graph: MagicMock
 ) -> None:

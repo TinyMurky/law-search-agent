@@ -10,6 +10,7 @@ from langchain_google_genai import ChatGoogleGenerativeAI
 from pydantic import BaseModel, Field
 
 from agent.state import AgenticRAGState, SubQuery
+from ingestion.law_graph.nx_law_graph import NxLawGraph
 
 # ── Pydantic schemas ──────────────────────────────────────────────────
 
@@ -57,6 +58,7 @@ class SubQuerySpec(BaseModel):
         "law:semantic",
         "law:hyde",
         "law:direct_lookup",
+        "law:direct_lookup_ambiguous",
         "law:graph_expand",
         "judgment:tavily",
     ]
@@ -304,16 +306,68 @@ def _to_sub_query(spec: SubQuerySpec) -> SubQuery:
     )
 
 
+def _resolve_direct_lookup_specs(
+    query: str,
+    law_name: str | None,
+    article_no: str | None,
+    law_graph: NxLawGraph,
+) -> list[SubQuerySpec]:
+    """將 direct_lookup 的法律名稱正規化為正統名稱，可能拆成多筆。
+
+    候選為 0 筆時保留原始名稱（交給後續查詢照舊失敗，不改變
+    現有行為）；候選為 1 筆時直接採用該正統名稱；候選 2 筆以上
+    代表名稱有歧義，改用 law:direct_lookup_ambiguous，讓每個
+    候選各自成一筆查詢，交由 grade_documents 依問題本身篩掉
+    猜錯的候選。
+
+    Args:
+        query (str): 子查詢文字。
+        law_name (str | None): LLM 解析出的法律名稱，可能是
+            口語簡稱，例如「刑法」。
+        article_no (str | None): LLM 解析出的條號。
+        law_graph (NxLawGraph): 用於解析正統名稱候選。
+
+    Returns:
+        list[SubQuerySpec]: 候選為 0 或 1 筆時回傳長度為 1 的
+            清單；候選 2 筆以上時回傳每個候選各一筆的清單。
+    """
+    candidates = law_graph.resolve_law_names(law_name or "")
+
+    if len(candidates) <= 1:
+        resolved_name = candidates[0] if candidates else law_name
+        return [
+            SubQuerySpec(
+                query=query,
+                strategy="law:direct_lookup",
+                law_name=resolved_name,
+                article_no=article_no,
+            )
+        ]
+
+    return [
+        SubQuerySpec(
+            query=query,
+            strategy="law:direct_lookup_ambiguous",
+            law_name=candidate,
+            article_no=article_no,
+        )
+        for candidate in candidates
+    ]
+
+
 # ── Node factory ──────────────────────────────────────────────────────
 
 
 def make_analyze_query_node(
     llm: ChatGoogleGenerativeAI,
+    law_graph: NxLawGraph,
 ) -> Callable[[AgenticRAGState], dict[str, object]]:
-    """建立 analyze_query 節點，注入 LLM 依賴。
+    """建立 analyze_query 節點，注入 LLM 與圖查詢依賴。
 
     Args:
         llm (ChatGoogleGenerativeAI): 節點內各 chain 共用的 LLM。
+        law_graph (NxLawGraph): 用於將 direct_lookup 解析出的
+            法律名稱正規化為正統名稱。
 
     Returns:
         Callable[[AgenticRAGState], dict[str, object]]: analyze_query
@@ -354,30 +408,33 @@ def make_analyze_query_node(
             for q in sub_queries:
                 _ln = str(q["law_name"]) if q.get("law_name") else None
                 _an = str(q["article_no"]) if q.get("article_no") else None
-                specs.append(
-                    SubQuerySpec(
-                        query=str(q["query"]),
-                        strategy=q["strategy"],
-                        law_name=_ln,
-                        article_no=_an,
+                if q["strategy"] == "law:direct_lookup":
+                    specs.extend(
+                        _resolve_direct_lookup_specs(
+                            str(q["query"]), _ln, _an, law_graph
+                        )
                     )
-                )
+                else:
+                    specs.append(
+                        SubQuerySpec(
+                            query=str(q["query"]),
+                            strategy=q["strategy"],
+                            law_name=_ln,
+                            article_no=_an,
+                        )
+                    )
             print(f"[analyze_query] 策略：子查詢分解，{len(specs)} 個子查詢")
 
         elif intent == "lookup" and ir["has_specific_article"]:
             _law = str(ir["law_name"]) if ir["law_name"] else None
             _art = str(ir["article_no"]) if ir["article_no"] else None
-            specs = [
-                SubQuerySpec(
-                    query=question,
-                    strategy="law:direct_lookup",
-                    law_name=_law,
-                    article_no=_art,
-                )
-            ]
+            specs = _resolve_direct_lookup_specs(
+                question, _law, _art, law_graph
+            )
             print(
                 f"[analyze_query] 策略：direct_lookup"
-                f"（{ir['law_name']} {ir['article_no']}）"
+                f"（{ir['law_name']} {ir['article_no']}，"
+                f"{len(specs)} 個候選）"
             )
 
         elif intent == "lookup":

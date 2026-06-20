@@ -110,7 +110,10 @@ def make_retrieve_node(
                 for chunk in results:
                     _add(_search_result_to_doc(chunk, strategy))
 
-            elif strategy == "law:direct_lookup":
+            elif strategy in (
+                "law:direct_lookup",
+                "law:direct_lookup_ambiguous",
+            ):
                 pcode = law_graph.find_pcode_by_name(sub["law_name"] or "")
                 if pcode is None:
                     print(f"[retrieve] 找不到 pcode：{sub['law_name']}")
