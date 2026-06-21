@@ -85,6 +85,28 @@ data: [DONE]
 
 每行是一個小片段（token），客戶端逐行接收，拼起來就是完整回答。
 
+**重跑時的 `event: reset`**：Self-RAG 的 `generate` 節點可能因
+幻覺檢查沒過而重跑（regenerate），或因答案品質沒過而整輪重新
+檢索再生成。重跑代表前面已經送出去的 token 全部要被放棄，這時
+會多送一個控制事件：
+
+```
+data: 第一次回答的內容（後來被放棄）
+
+event: reset
+data: 
+
+data: 第二次（最終版本）的回答內容
+
+data: [DONE]
+```
+
+客戶端收到 `event: reset` 要清空目前已累積顯示的文字，從頭開始
+接收後面的 token——**這不是理論上的情境，是實際對 Gemini 跑過
+才發現的真實 bug**：沒有這個機制時，使用者會看到同一題的答案
+完整出現兩次（regenerate 前後各一次）疊在畫面上。客戶端實作見
+`src/entrypoints/streamlit_demo/main.py` 的 `_render_answer()`。
+
 ---
 
 ## 關鍵模式
@@ -124,6 +146,40 @@ async def search_stream(
 > 不一致）。純文字 token 要用 `raw_data=` 才會是未經 JSON 包裝的
 > 原始字串，這個專案的串流回答一律用 `raw_data=`。
 
+> **`chunk.content` 不一定是 `str`**：Gemini 串流時實際回傳的是
+> 內容區塊組成的 list（例如
+> `[{"type": "text", "text": "根據", "index": 0}]`），直接當字串
+> 用會讓 `ServerSentEvent(raw_data=...)` 驗證失敗、整個請求 500。
+> 要用類似 `src/api/app.py` 的 `_extract_token_text()` 統一轉成
+> 純文字，只取文字區塊，忽略其他類型（例如 tool call）。
+
+### 篩選真正的最終答案：FINAL_ANSWER_TAG
+
+`agent.astream_events(...)` 會吐出整個 graph 執行期間**所有**
+LLM 呼叫的串流事件，不只是 `generate` 節點——`analyze_query` 的
+意圖分類、`generate` 節點內部呼叫的 hallucination/answer grader，
+全部共用同一個 `llm`，如果只憑 `event["event"] ==
+"on_chat_model_stream"` 篩選，會把這些內部訊號的 JSON 也混進使用
+者看到的答案裡（**實測對 Gemini 跑過才發現**，不是假設情境）。
+
+解法：`src/agent/nodes/generate.py` 把真正要回的答案 chain
+（`generate_chain`/`regenerate_chain`）打上 `FINAL_ANSWER_TAG`
+標籤（`.with_config(tags=[FINAL_ANSWER_TAG])`），grader 不打標籤。
+`/search/stream` 同時檢查事件名稱跟標籤才放行：
+
+```python
+is_token = event["event"] == "on_chat_model_stream"
+is_final_answer = FINAL_ANSWER_TAG in event.get("tags", [])
+if is_token and is_final_answer:
+    ...
+```
+
+光打標籤還不夠：`generate` 節點可能因 regenerate 重跑多次，每次
+都是獨立的 LLM run（不同 `run_id`）但都打著同一個標籤，這就是
+上面〈重跑時的 `event: reset`〉那個 bug 的根源——完整邏輯見
+`src/api/app.py` 的 `_stream_final_answer_events()`：追蹤
+`run_id`，一旦變化就送 `event: reset`。
+
 ### 模組結構：create_app(agent) 工廠函式，不是 class、不是模組級單例
 
 FastAPI 的程式碼分成兩個檔案，職責切開：
@@ -131,7 +187,7 @@ FastAPI 的程式碼分成兩個檔案，職責切開：
 ```
 src/api/app.py              ← 純邏輯：create_app(agent) -> FastAPI
 src/agent/bootstrap.py      ← 共用：build_agent_from_env() -> CompiledStateGraph
-src/cmd/api_server/main.py  ← 薄的進入點：把上面兩個接起來、跑 uvicorn
+src/entrypoints/api_server/main.py  ← 薄的進入點：把上面兩個接起來、跑 uvicorn
 ```
 
 `src/api/app.py` 不碰 `.env`、不知道 Agent 怎麼建出來的，agent 是
@@ -157,7 +213,7 @@ def create_app(agent: CompiledStateGraph) -> FastAPI:
 ```
 
 ```python
-# src/cmd/api_server/main.py（簡化示意，非完整程式碼）
+# src/entrypoints/api_server/main.py（簡化示意，非完整程式碼）
 import uvicorn
 
 from agent.bootstrap import build_agent_from_env
@@ -215,24 +271,24 @@ framework 提供的容器（路由、`app.state` 都有了），再包一層
 ## 啟動方式
 
 `main()` 內部呼叫 `uvicorn.run(app, ...)`（programmatic，不是
-`uvicorn module:app` 的 CLI 字串形式），跟其他 `src/cmd/*/main.py`
+`uvicorn module:app` 的 CLI 字串形式），跟其他 `src/entrypoints/*/main.py`
 一樣用 `uv run` 直接執行整個腳本：
 
 ```bash
 make api-server
-# 等同於：PYTHONPATH=src uv run src/cmd/api_server/main.py
+# 等同於：PYTHONPATH=src uv run src/entrypoints/api_server/main.py
 ```
 
 ### Streamlit demo 怎麼呼叫這個 API
 
-`src/cmd/streamlit_demo/main.py` 是另一個獨立 process（`streamlit
+`src/entrypoints/streamlit_demo/main.py` 是另一個獨立 process（`streamlit
 run` 啟動，不是 `uvicorn`），內部單純用 `httpx` 打
 `/search/stream`，跟未來真正的網頁前端是同一種角色——它**不會**
 import Agent，所以不適用 `create_app(agent)` 那套注入設計，純粹
 是 FastAPI 的其中一個呼叫者：
 
 ```python
-# src/cmd/streamlit_demo/main.py（簡化示意，非完整程式碼）
+# src/entrypoints/streamlit_demo/main.py（簡化示意，非完整程式碼）
 import httpx
 import streamlit as st
 
@@ -253,17 +309,17 @@ if query:
 ```
 
 因為是純展示用途，這個檔案不拆 module、不寫單元測試，跟其他
-`src/cmd/*/main.py` 進入點的慣例一致。FastAPI 跟 Streamlit 是兩個
+`src/entrypoints/*/main.py` 進入點的慣例一致。FastAPI 跟 Streamlit 是兩個
 獨立 process，要分別啟動（兩個 terminal）：
 
 ```makefile
 .PHONY: api-server
 api-server: ## 啟動 FastAPI server（streamlit-demo 需要先啟動這個，留在前景跑）
-	@PYTHONPATH=src uv run src/cmd/api_server/main.py
+	@PYTHONPATH=src uv run src/entrypoints/api_server/main.py
 
 .PHONY: streamlit-demo
 streamlit-demo: ## 啟動 Streamlit demo（需先在另一個 terminal 跑 make api-server）
-	@PYTHONPATH=src uv run streamlit run src/cmd/streamlit_demo/main.py
+	@PYTHONPATH=src uv run streamlit run src/entrypoints/streamlit_demo/main.py
 ```
 
 沒有做成一鍵同時啟動兩個 process，因為要正確處理「確認 FastAPI

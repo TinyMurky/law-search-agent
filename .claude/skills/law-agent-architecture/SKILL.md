@@ -71,7 +71,7 @@ interface」設計。
 
 `chat`、`api_server`、未來的 `mcp_server` 三個 entry point 都需要
 「載入 `.env`、建立 `ChunkBuilder`/`NxLawGraph`/LLM、組裝
-`build_graph(...)`」這一整套流程——目前 `src/cmd/chat/main.py` 的
+`build_graph(...)`」這一整套流程——目前 `src/entrypoints/chat/main.py` 的
 `_load_deps()` 就是這套邏輯，但只活在 `chat` 自己的檔案裡。
 
 決定抽成 `src/agent/bootstrap.py` 的共用函式
@@ -83,11 +83,11 @@ point 各自的事」，而是「怎麼從環境變數生出一個可用的 Agen
 
 ### Streamlit demo：FastAPI 的其中一個呼叫者，不是新的一層
 
-`src/cmd/streamlit_demo/main.py` 是純粹的 demo 用途，內部用
+`src/entrypoints/streamlit_demo/main.py` 是純粹的 demo 用途，內部用
 `httpx` 呼叫 FastAPI 的 `/search/stream`（跟網頁前端是同一種角色），
 **不會** import 或建立 Agent，所以不適用「平行 interface 各自注入
 Agent」那套設計。它單檔案實作，不拆 module、不寫單元測試，跟
-`src/cmd/*/main.py` 其他進入點的慣例一致（這些薄的 wiring 腳本
+`src/entrypoints/*/main.py` 其他進入點的慣例一致（這些薄的 wiring 腳本
 本來就不在 `tests/` 的覆蓋範圍內，邏輯都收斂在 `src/agent/`、
 `src/ingestion/` 才測）。細節見 `references/api-layer.md`。
 
@@ -97,11 +97,11 @@ Agent」那套設計。它單檔案實作，不拆 module、不寫單元測試�
 
 | 層級 | 職責 | 程式碼位置 | 實作狀態 |
 |---|---|---|---|
-| **MCP Server** | 把 MCP tool call 轉成對 Agent 的直接呼叫，回傳完整結果 | `src/cmd/mcp_server/` | 未實作 |
-| **FastAPI** | 對外 API、SSE 串流、直接呼叫 Agent | `src/api/`（app 邏輯）+ `src/cmd/api_server/`（entry point） | 未實作 |
+| **MCP Server** | 把 MCP tool call 轉成對 Agent 的直接呼叫，回傳完整結果 | `src/entrypoints/mcp_server/` | 未實作 |
+| **FastAPI** | 對外 API、SSE 串流、直接呼叫 Agent | `src/api/`（app 邏輯）+ `src/entrypoints/api_server/`（entry point） | 未實作 |
 | **LangGraph Agent** | 決策、工具選擇、對話管理（被 MCP Server 與 FastAPI 兩個 interface 共用） | `src/agent/`（含共用的 `bootstrap.py`） | 未實作 |
 | **DB Layer** | 向量搜尋 + 圖遍歷 | `src/ingestion/` | Phase 1 完成 |
-| **Streamlit Demo**（非核心層，純展示用） | 純 HTTP 呼叫 FastAPI 的 `/search/stream`，不碰 Agent | `src/cmd/streamlit_demo/` | 未實作 |
+| **Streamlit Demo**（非核心層，純展示用） | 純 HTTP 呼叫 FastAPI 的 `/search/stream`，不碰 Agent | `src/entrypoints/streamlit_demo/` | 未實作 |
 
 ---
 

@@ -22,7 +22,7 @@
 |---|---|---|
 | Chroma `chunks` collection | 已完成 | `src/ingestion/law_vector/chunk_builder.py` |
 | NetworkX 圖建立 | 已完成 | `src/ingestion/law_graph/builder.py` |
-| CLI 入口 | 已完成 | `src/cmd/build_chunks/main.py` |
+| CLI 入口 | 已完成 | `src/entrypoints/build_chunks/main.py` |
 
 ### Vector DB：Chroma
 

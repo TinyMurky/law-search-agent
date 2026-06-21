@@ -15,6 +15,10 @@ from agent.state import AgenticRAGState
 
 logger = logging.getLogger(__name__)
 
+# astream_events 的消費者（例如 src/api/app.py）用這個標籤篩出
+# 真正要回傳給使用者的答案，跟同一個節點內呼叫的 grader 區分開。
+FINAL_ANSWER_TAG = "final_answer"
+
 # ── Pydantic schemas ──────────────────────────────────────────────────
 
 
@@ -121,6 +125,12 @@ def _make_generate_chain(
 ) -> Runnable:
     """建立依指定 system prompt 生成答案的 LLM chain。
 
+    打上 `FINAL_ANSWER_TAG` 標籤，讓 `astream_events` 的消費者
+    （例如 `src/api/app.py` 的 `/search/stream`）能跟同一個節點內
+    呼叫的 hallucination/answer grader 區分開——這兩個 grader 用
+    同一個 `llm`，如果不打標籤，`langgraph_node` 都會顯示
+    `"generate"`，沒辦法只挑出真正要回傳給使用者的答案。
+
     Args:
         llm (ChatGoogleGenerativeAI): 用於生成答案的 LLM。
         system_prompt (str): 套用的 system prompt
@@ -135,7 +145,8 @@ def _make_generate_chain(
             ("human", "{question}"),
         ]
     )
-    return prompt | llm | StrOutputParser()
+    chain = prompt | llm | StrOutputParser()
+    return chain.with_config(tags=[FINAL_ANSWER_TAG])
 
 
 def _make_hallucination_grader_chain(

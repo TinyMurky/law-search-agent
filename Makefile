@@ -2,7 +2,7 @@
 
 .PHONY: load-laws
 load-laws: ## load-laws will load raw data of law (in json form) to graph and vectorDB
-	@PYTHONPATH=src uv run src/cmd/load_laws/main.py
+	@PYTHONPATH=src uv run src/entrypoints/load_laws/main.py
 
 # Chunk embedding workflow:
 #   build-chunks   — 安全的日常指令。DB 已滿時只做本地 ID 查詢（不呼叫 API，~30 秒）；
@@ -11,23 +11,23 @@ load-laws: ## load-laws will load raw data of law (in json form) to graph and ve
 
 .PHONY: build-chunks
 build-chunks: ## resume / show results（DB 已滿則跳過 API；中斷後接續）
-	@PYTHONPATH=src uv run src/cmd/build_chunks/main.py
+	@PYTHONPATH=src uv run src/entrypoints/build_chunks/main.py
 
 .PHONY: rebuild-chunks
 rebuild-chunks: ## 清空 DB 並重新 embed 全部條文（慢，消耗 API 配額）
-	@PYTHONPATH=src uv run src/cmd/build_chunks/main.py --force
+	@PYTHONPATH=src uv run src/entrypoints/build_chunks/main.py --force
 
 .PHONY: chat
 chat: ## 啟動 terminal 互動 Agent（需先執行 make build-chunks）
-	@PYTHONPATH=src uv run src/cmd/chat/main.py
+	@PYTHONPATH=src uv run src/entrypoints/chat/main.py
 
 .PHONY: api-server
 api-server: ## 啟動 FastAPI server（需先執行 make build-chunks；streamlit-demo 需要這個先跑著）
-	@PYTHONPATH=src uv run src/cmd/api_server/main.py
+	@PYTHONPATH=src uv run src/entrypoints/api_server/main.py
 
 .PHONY: streamlit-demo
 streamlit-demo: ## 啟動 Streamlit demo（需先在另一個 terminal 跑 make api-server）
-	@PYTHONPATH=src uv run streamlit run src/cmd/streamlit_demo/main.py
+	@PYTHONPATH=src uv run streamlit run src/entrypoints/streamlit_demo/main.py
 
 .PHONY: install-python
 install-python: ## install python version of PYTHON_VERSION

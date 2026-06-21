@@ -1,4 +1,4 @@
-"""共用 logging 設定，供各 src/cmd/*/main.py entry point 啟動時呼叫。"""
+"""共用 logging 設定，供各 src/entrypoints/*/main.py entry point 啟動時呼叫。"""
 
 from __future__ import annotations
 

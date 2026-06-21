@@ -118,7 +118,7 @@ async def ask_law_agent(query: str) -> str:
 ### 啟動方式
 
 ```python
-# src/cmd/mcp_server/main.py
+# src/entrypoints/mcp_server/main.py
 mcp = FastMCP("law-search-agent", transport="streamable-http", port=8001)
 
 if __name__ == "__main__":
