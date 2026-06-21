@@ -114,9 +114,15 @@ async def search_stream(
     async for event in agent.astream_events({"messages": [request.query]}):
         if event["event"] == "on_chat_model_stream":
             token = event["data"]["chunk"].content
-            yield ServerSentEvent(data=token)
-    yield ServerSentEvent(data="[DONE]")   # 告訴客戶端已結束
+            yield ServerSentEvent(raw_data=token)
+    yield ServerSentEvent(raw_data="[DONE]")   # 告訴客戶端已結束
 ```
+
+> **`data=` vs `raw_data=`**：實作時發現用 `data=token` 會把字串
+> 當 JSON 編碼（中文會被轉成 `\uXXXX` escape，不是肉眼可讀的原文，
+> 也跟本文件〈Response 格式〉寫的 `data: 根據` 這種原始文字格式
+> 不一致）。純文字 token 要用 `raw_data=` 才會是未經 JSON 包裝的
+> 原始字串，這個專案的串流回答一律用 `raw_data=`。
 
 ### 模組結構：create_app(agent) 工廠函式，不是 class、不是模組級單例
 

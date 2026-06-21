@@ -1,7 +1,7 @@
 from typing import Annotated, TypedDict
 
 from langchain_core.documents import Document
-from langchain_core.messages import BaseMessage
+from langchain_core.messages import BaseMessage, HumanMessage
 from langgraph.graph.message import add_messages
 
 from agent.strategy_registry import StrategyName
@@ -60,3 +60,35 @@ class AgenticRAGState(TypedDict):
 
     # 多輪對話歷史
     messages: Annotated[list[BaseMessage], add_messages]
+
+
+def make_initial_state(question: str) -> AgenticRAGState:
+    """建立單次對話的初始 AgenticRAGState。
+
+    供 chat、api_server 等 entry point 共用，避免各自複製一份初始
+    狀態欄位的預設值。
+
+    Args:
+        question (str): 使用者輸入的問題。
+
+    Returns:
+        AgenticRAGState: 可直接傳入 graph.invoke/ainvoke 的初始狀態。
+    """
+    return AgenticRAGState(
+        question=question,
+        intent="",
+        complexity="",
+        rewritten_queries=[],
+        documents=[],
+        grade_passed=False,
+        generation="",
+        hallucination_passed=True,
+        answer_passed=True,
+        rewrite_count=0,
+        max_rewrites=3,
+        regenerate_count=0,
+        max_regenerates=2,
+        halt_reason="",
+        judgment_api_token="",
+        messages=[HumanMessage(content=question)],
+    )

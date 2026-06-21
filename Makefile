@@ -21,6 +21,14 @@ rebuild-chunks: ## 清空 DB 並重新 embed 全部條文（慢，消耗 API 配
 chat: ## 啟動 terminal 互動 Agent（需先執行 make build-chunks）
 	@PYTHONPATH=src uv run src/cmd/chat/main.py
 
+.PHONY: api-server
+api-server: ## 啟動 FastAPI server（需先執行 make build-chunks；streamlit-demo 需要這個先跑著）
+	@PYTHONPATH=src uv run src/cmd/api_server/main.py
+
+.PHONY: streamlit-demo
+streamlit-demo: ## 啟動 Streamlit demo（需先在另一個 terminal 跑 make api-server）
+	@PYTHONPATH=src uv run streamlit run src/cmd/streamlit_demo/main.py
+
 .PHONY: install-python
 install-python: ## install python version of PYTHON_VERSION
 	@uv python install ${PYTHON_VERSION}
