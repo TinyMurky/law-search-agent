@@ -67,6 +67,30 @@ scale 的 service（例如其中一個對外網開放，另一個只留內網）
 不是協議相容性的要求——目前先以「同一個部署單位，兩個平行
 interface」設計。
 
+### 共用的 Agent 建立邏輯：build_agent_from_env()
+
+`chat`、`api_server`、未來的 `mcp_server` 三個 entry point 都需要
+「載入 `.env`、建立 `ChunkBuilder`/`NxLawGraph`/LLM、組裝
+`build_graph(...)`」這一整套流程——目前 `src/cmd/chat/main.py` 的
+`_load_deps()` 就是這套邏輯，但只活在 `chat` 自己的檔案裡。
+
+決定抽成 `src/agent/bootstrap.py` 的共用函式
+`build_agent_from_env() -> CompiledStateGraph`，三個 entry point
+都改成呼叫它，不再各自複製一份。原因：這套邏輯不是「每個 entry
+point 各自的事」，而是「怎麼從環境變數生出一個可用的 Agent」這
+件事本身只有一種正確答案，重複三份只會在未來改依賴注入方式時
+要同步改三處。
+
+### Streamlit demo：FastAPI 的其中一個呼叫者，不是新的一層
+
+`src/cmd/streamlit_demo/main.py` 是純粹的 demo 用途，內部用
+`httpx` 呼叫 FastAPI 的 `/search/stream`（跟網頁前端是同一種角色），
+**不會** import 或建立 Agent，所以不適用「平行 interface 各自注入
+Agent」那套設計。它單檔案實作，不拆 module、不寫單元測試，跟
+`src/cmd/*/main.py` 其他進入點的慣例一致（這些薄的 wiring 腳本
+本來就不在 `tests/` 的覆蓋範圍內，邏輯都收斂在 `src/agent/`、
+`src/ingestion/` 才測）。細節見 `references/api-layer.md`。
+
 ---
 
 ## 層級總覽
@@ -74,9 +98,10 @@ interface」設計。
 | 層級 | 職責 | 程式碼位置 | 實作狀態 |
 |---|---|---|---|
 | **MCP Server** | 把 MCP tool call 轉成對 Agent 的直接呼叫，回傳完整結果 | `src/cmd/mcp_server/` | 未實作 |
-| **FastAPI** | 對外 API、SSE 串流、直接呼叫 Agent | `src/cmd/api_server/` | 未實作 |
-| **LangGraph Agent** | 決策、工具選擇、對話管理（被 MCP Server 與 FastAPI 兩個 interface 共用） | `src/agent/` | 未實作 |
+| **FastAPI** | 對外 API、SSE 串流、直接呼叫 Agent | `src/api/`（app 邏輯）+ `src/cmd/api_server/`（entry point） | 未實作 |
+| **LangGraph Agent** | 決策、工具選擇、對話管理（被 MCP Server 與 FastAPI 兩個 interface 共用） | `src/agent/`（含共用的 `bootstrap.py`） | 未實作 |
 | **DB Layer** | 向量搜尋 + 圖遍歷 | `src/ingestion/` | Phase 1 完成 |
+| **Streamlit Demo**（非核心層，純展示用） | 純 HTTP 呼叫 FastAPI 的 `/search/stream`，不碰 Agent | `src/cmd/streamlit_demo/` | 未實作 |
 
 ---
 
@@ -102,7 +127,7 @@ Phase 2 的核心變化：Chroma + NetworkX 兩套系統統一換成一套 Neo4j
 | Reference 檔案 | 說明 |
 |---|---|
 | `references/mcp-layer.md` | MCP Server：工具定義、直接呼叫 Agent 的方式、Streamable-HTTP 設定 |
-| `references/api-layer.md` | FastAPI：endpoint 列表、SSE 串流寫法、與 Agent 的呼叫方式 |
+| `references/api-layer.md` | FastAPI：endpoint 列表、SSE 串流寫法、與 Agent 的呼叫方式、`create_app(agent)` 工廠模式、Streamlit demo 怎麼呼叫它 |
 | `references/agent-layer.md` | **已過時，請改看 `law-rag-agent` skill**（State、Graph 流程、節點、Strategy Registry 的現行設計都在那裡）|
 | `references/db-layer.md` | DB Layer：Chroma + NetworkX（Phase 1）→ Neo4j（Phase 2） |
 

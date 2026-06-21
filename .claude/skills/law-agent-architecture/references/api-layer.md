@@ -118,18 +118,81 @@ async def search_stream(
     yield ServerSentEvent(data="[DONE]")   # 告訴客戶端已結束
 ```
 
-### 與 Agent 的呼叫方式
+### 模組結構：create_app(agent) 工廠函式，不是 class、不是模組級單例
 
-FastAPI 直接 import 並呼叫 LangGraph graph，不透過 HTTP：
+FastAPI 的程式碼分成兩個檔案，職責切開：
+
+```
+src/api/app.py              ← 純邏輯：create_app(agent) -> FastAPI
+src/agent/bootstrap.py      ← 共用：build_agent_from_env() -> CompiledStateGraph
+src/cmd/api_server/main.py  ← 薄的進入點：把上面兩個接起來、跑 uvicorn
+```
+
+`src/api/app.py` 不碰 `.env`、不知道 Agent 怎麼建出來的，agent 是
+呼叫 `create_app()` 時當參數傳入（注入），不是在裡面 import 一個
+全域 `law_graph` 變數：
 
 ```python
-# 非完整程式碼，示意資料流
-from agent.graph import law_graph   # 直接 import graph
+# src/api/app.py（簡化示意，非完整程式碼）
+from fastapi import FastAPI
+from langgraph.graph.state import CompiledStateGraph
 
-result = await law_graph.ainvoke({"messages": [query]})    # 等待完整結果
-# 或
-events = law_graph.astream_events({"messages": [query]})   # 串流
+
+def create_app(agent: CompiledStateGraph) -> FastAPI:
+    """組裝 FastAPI app，把 Agent 當依賴注入進來。"""
+    app = FastAPI()
+
+    @app.post("/search")
+    async def search(req: SearchRequest) -> SearchResponse:
+        result = await agent.ainvoke({"messages": [req.query]})
+        return SearchResponse(answer=result["generation"])
+
+    return app
 ```
+
+```python
+# src/cmd/api_server/main.py（簡化示意，非完整程式碼）
+import uvicorn
+
+from agent.bootstrap import build_agent_from_env
+from api.app import create_app
+from logging_config import setup_logging
+
+
+def main() -> None:
+    setup_logging()
+    agent = build_agent_from_env()
+    app = create_app(agent)
+    uvicorn.run(app, host="0.0.0.0", port=8000)
+
+
+if __name__ == "__main__":
+    main()
+```
+
+**為什麼是工廠函式，不是 class**：`FastAPI()` 物件本身已經是
+framework 提供的容器（路由、`app.state` 都有了），再包一層
+`class LawSearchAPI: def __init__(self, agent): self.app = FastAPI()`
+不會多換到任何行為，純粹多一層轉發。這個專案的慣例是：class
+只用在真的有內部狀態與邏輯要管理的東西（`src/ingestion/` 的
+`ChunkBuilder`、`NxLawGraph` 等），組裝/orchestration 層（`build_graph(...)`
+也是同樣風格）一律用函式。
+
+**為什麼是工廠函式，不是模組級 `app = FastAPI()` 單例**：工廠函式
+每次呼叫都回傳全新的 app 物件，測試時 `create_app(fake_agent)`
+天然互不干擾；模組級單例需要靠 `app.state.agent = ...` 改全域
+可變狀態，平行跑測試（例如 `pytest-xdist`）時要額外小心互相
+汙染。換到的唯一好處（`uvicorn api.app:app --reload` 可以單獨啟動
+熱重載）目前用不到，所以不選這個方案。
+
+### build_agent_from_env()：三個 entry point 共用，不要各自複製
+
+`chat`、`api_server`、未來的 `mcp_server` 都需要同一套「讀
+`.env` → 建 `ChunkBuilder`/`NxLawGraph`/LLM → `build_graph(...)`」
+流程，這套邏輯收斂在 `src/agent/bootstrap.py` 的
+`build_agent_from_env() -> CompiledStateGraph`，三邊都呼叫它，
+不要各自複製一份（複製多份意味著未來改依賴注入方式要同步改
+三處）。
 
 ---
 
@@ -145,9 +208,62 @@ events = law_graph.astream_events({"messages": [query]})   # 串流
 
 ## 啟動方式
 
+`main()` 內部呼叫 `uvicorn.run(app, ...)`（programmatic，不是
+`uvicorn module:app` 的 CLI 字串形式），跟其他 `src/cmd/*/main.py`
+一樣用 `uv run` 直接執行整個腳本：
+
 ```bash
-uvicorn src.cmd.api_server.main:app --host 0.0.0.0 --port 8000
+make api-server
+# 等同於：PYTHONPATH=src uv run src/cmd/api_server/main.py
 ```
+
+### Streamlit demo 怎麼呼叫這個 API
+
+`src/cmd/streamlit_demo/main.py` 是另一個獨立 process（`streamlit
+run` 啟動，不是 `uvicorn`），內部單純用 `httpx` 打
+`/search/stream`，跟未來真正的網頁前端是同一種角色——它**不會**
+import Agent，所以不適用 `create_app(agent)` 那套注入設計，純粹
+是 FastAPI 的其中一個呼叫者：
+
+```python
+# src/cmd/streamlit_demo/main.py（簡化示意，非完整程式碼）
+import httpx
+import streamlit as st
+
+_API_URL = "http://localhost:8000/search/stream"
+
+
+def _stream_answer(query: str):
+    with httpx.Client() as client:
+        with client.stream("POST", _API_URL, json={"query": query}) as r:
+            for line in r.iter_lines():
+                if line.startswith("data: ") and line != "data: [DONE]":
+                    yield line[6:]
+
+
+query = st.text_input("問題")
+if query:
+    st.write_stream(_stream_answer(query))
+```
+
+因為是純展示用途，這個檔案不拆 module、不寫單元測試，跟其他
+`src/cmd/*/main.py` 進入點的慣例一致。FastAPI 跟 Streamlit 是兩個
+獨立 process，要分別啟動（兩個 terminal）：
+
+```makefile
+.PHONY: api-server
+api-server: ## 啟動 FastAPI server（streamlit-demo 需要先啟動這個，留在前景跑）
+	@PYTHONPATH=src uv run src/cmd/api_server/main.py
+
+.PHONY: streamlit-demo
+streamlit-demo: ## 啟動 Streamlit demo（需先在另一個 terminal 跑 make api-server）
+	@PYTHONPATH=src uv run streamlit run src/cmd/streamlit_demo/main.py
+```
+
+沒有做成一鍵同時啟動兩個 process，因為要正確處理「確認 FastAPI
+就緒才啟動 Streamlit」「Ctrl+C 連帶關閉背景 process」這些問題，
+對 demo 用途來說不值得在 Makefile 裡硬塞程序管理邏輯；真的需要
+一鍵啟動時，再考慮 `docker-compose` 或簡單的 shell script。
 
 ---
 
