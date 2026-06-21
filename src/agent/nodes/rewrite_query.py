@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 from collections.abc import Callable
 
 from langchain_core.output_parsers import StrOutputParser
@@ -8,6 +9,8 @@ from langchain_core.runnables import Runnable
 from langchain_google_genai import ChatGoogleGenerativeAI
 
 from agent.state import AgenticRAGState, SubQuery
+
+logger = logging.getLogger(__name__)
 
 _REWRITE_SYSTEM = """\
 你是一個法律查詢最佳化器，專門處理台灣法律條文的語意搜尋。
@@ -65,7 +68,7 @@ def make_rewrite_query_node(
         question = state["question"]
         new_query: str = rewrite_chain.invoke({"question": question})
         new_rewrite_count = state["rewrite_count"] + 1
-        print(
+        logger.info(
             f"[rewrite] 第 {new_rewrite_count} 次重寫，" f"新查詢：{new_query[:60]}..."
         )
         # rewrite 後固定使用 law:semantic（最通用的 fallback 策略）。

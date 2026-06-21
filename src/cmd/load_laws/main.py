@@ -1,3 +1,4 @@
+import logging
 from pathlib import Path
 
 from ingestion.law_graph.builder import LawGraphBuilder
@@ -7,12 +8,15 @@ from ingestion.law_ingestion.citation_extractor import (
 )
 from ingestion.law_ingestion.law import Law
 from ingestion.law_ingestion.law_reader import LawReader
+from logging_config import setup_logging
+
+logger = logging.getLogger(__name__)
 
 _DATA_PATH = Path("raw_data/laws/ChLaw.json")
 
 
-def _print_stats(laws: list[Law]) -> None:
-    """印出法律、條文與引用關係的數量統計。
+def _log_stats(laws: list[Law]) -> None:
+    """記錄法律、條文與引用關係的數量統計。
 
     Args:
         laws (list[Law]): 已完成引用解析的法律清單。
@@ -29,9 +33,9 @@ def _print_stats(laws: list[Law]) -> None:
         for a in law.articles
         if a.article_type == "A"
     )
-    print(f"法律數量：{len(laws)} 部")
-    print(f"條文數量：{total_articles} 條")
-    print(f"引用關係：{total_citations} 筆")
+    logger.info(f"法律數量：{len(laws)} 部")
+    logger.info(f"條文數量：{total_articles} 條")
+    logger.info(f"引用關係：{total_citations} 筆")
 
 
 def _find_sample(
@@ -57,10 +61,10 @@ def _find_sample(
     return None
 
 
-def _print_graph_demo(
+def _log_graph_demo(
     laws: list[Law], graph: NxLawGraph
 ) -> None:
-    """印出圖查詢示範：條文數量、引用與被引用關係。
+    """記錄圖查詢示範：條文數量、引用與被引用關係。
 
     Args:
         laws (list[Law]): 已完成引用解析的法律清單。
@@ -68,7 +72,7 @@ def _print_graph_demo(
     """
     sample = _find_sample(laws)
     if not sample:
-        print("找不到有引用關係的條文")
+        logger.info("找不到有引用關係的條文")
         return
 
     law_name, pcode, article_no = sample
@@ -76,31 +80,32 @@ def _print_graph_demo(
     cited = graph.get_cited_articles(pcode, article_no)
     citing = graph.get_citing_articles(pcode, article_no)
 
-    print(f"\n--- 圖查詢示範：{law_name} ---")
-    print(f"該法共 {len(articles)} 條條文")
-    print(f"\n{article_no} 引用 {len(cited)} 條：")
+    logger.info(f"--- 圖查詢示範：{law_name} ---")
+    logger.info(f"該法共 {len(articles)} 條條文")
+    logger.info(f"{article_no} 引用 {len(cited)} 條：")
     for c in cited[:5]:
-        print(f"  → {c}")
-    print(f"\n{article_no} 被引用 {len(citing)} 次")
+        logger.info(f"  → {c}")
+    logger.info(f"{article_no} 被引用 {len(citing)} 次")
 
 
 def main() -> None:
-    """載入法律資料、解析引用、建圖並印出示範結果。"""
-    print("載入法律資料...")
+    """載入法律資料、解析引用、建圖並記錄示範結果。"""
+    setup_logging()
+    logger.info("載入法律資料...")
     reader = LawReader(_DATA_PATH)
     laws = reader.load()
 
-    print("解析條文引用...")
+    logger.info("解析條文引用...")
     lookup = reader.build_name_to_pcode(laws)
     extractor = CitationExtractor(lookup)
     for law in laws:
         extractor.extract_from_law(law)
 
-    _print_stats(laws)
+    _log_stats(laws)
 
-    print("\n建立圖結構...")
+    logger.info("建立圖結構...")
     graph = LawGraphBuilder().build(laws)
-    _print_graph_demo(laws, graph)
+    _log_graph_demo(laws, graph)
 
 
 if __name__ == "__main__":

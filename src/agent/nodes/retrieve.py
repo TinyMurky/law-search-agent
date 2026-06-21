@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import re
 from collections.abc import Callable
 from typing import cast
@@ -11,6 +12,8 @@ from ingestion.law_graph.nodes import ArticleNodeAttrs
 from ingestion.law_graph.nx_law_graph import NxLawGraph
 from ingestion.law_vector.article_chunk import ArticleChunk
 from ingestion.law_vector.chunk_builder import ChunkBuilder
+
+logger = logging.getLogger(__name__)
 
 # VectorDB 會搜出幾個結果
 _SEARCH_K = 5
@@ -96,7 +99,7 @@ def make_retrieve_node(
 
         for sub in state["rewritten_queries"]:
             strategy = sub["strategy"]
-            print(f"[retrieve] strategy={strategy}")
+            logger.info(f"[retrieve] strategy={strategy}")
 
             if strategy in ("law:semantic", "law:hyde"):
                 try:
@@ -105,7 +108,7 @@ def make_retrieve_node(
                         k=_SEARCH_K,
                     )
                 except Exception as e:
-                    print(f"[retrieve] embedding 錯誤，跳過：{e}")
+                    logger.warning(f"[retrieve] embedding 錯誤，跳過：{e}")
                     continue
                 for chunk in results:
                     _add(_search_result_to_doc(chunk, strategy))
@@ -116,12 +119,16 @@ def make_retrieve_node(
             ):
                 pcode = law_graph.find_pcode_by_name(sub["law_name"] or "")
                 if pcode is None:
-                    print(f"[retrieve] 找不到 pcode：{sub['law_name']}")
+                    logger.warning(
+                        f"[retrieve] 找不到 pcode：{sub['law_name']}"
+                    )
                     continue
                 article_no = _normalize_article_no(sub["article_no"] or "")
                 result = law_graph.get_article(pcode, article_no)
                 if result is None:
-                    print(f"[retrieve] 找不到條文：" f"{pcode}#{article_no}")
+                    logger.warning(
+                        f"[retrieve] 找不到條文：" f"{pcode}#{article_no}"
+                    )
                     continue
                 node_id, article = result
                 _add(_article_node_to_doc(node_id, article, strategy))
@@ -133,7 +140,7 @@ def make_retrieve_node(
                         k=_SEARCH_K,
                     )
                 except Exception as e:
-                    print(f"[retrieve] embedding 錯誤，跳過：{e}")
+                    logger.warning(f"[retrieve] embedding 錯誤，跳過：{e}")
                     continue
                 for chunk in results:
                     _add(_search_result_to_doc(chunk, strategy))
@@ -156,9 +163,9 @@ def make_retrieve_node(
                             )
 
             elif strategy == "judgment:tavily":
-                print("[retrieve] judgment:tavily（placeholder）")
+                logger.info("[retrieve] judgment:tavily（placeholder）")
 
-        print(f"[retrieve] 共取得 {len(all_docs)} 份文件")
+        logger.info(f"[retrieve] 共取得 {len(all_docs)} 份文件")
         return {"documents": all_docs}
 
     return retrieve_node

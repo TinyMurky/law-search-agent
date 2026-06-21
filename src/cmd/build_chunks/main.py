@@ -1,4 +1,5 @@
 import argparse
+import logging
 import os
 import time
 from pathlib import Path
@@ -11,6 +12,9 @@ from ingestion.law_ingestion.citation_extractor import CitationExtractor
 from ingestion.law_ingestion.law import Law
 from ingestion.law_ingestion.law_reader import LawReader
 from ingestion.law_vector.chunk_builder import ChunkBuilder
+from logging_config import setup_logging
+
+logger = logging.getLogger(__name__)
 
 _DATA_PATH = Path("raw_data/laws/ChLaw.json")
 _CHROMA_DIR = "data/chroma_db"
@@ -23,10 +27,10 @@ def _load_laws() -> list[Law]:
     Returns:
         list[Law]: 已完成引用解析的法律清單。
     """
-    print("載入法律資料...")
+    logger.info("載入法律資料...")
     reader = LawReader(_DATA_PATH)
     laws = reader.load()
-    print("解析條文引用...")
+    logger.info("解析條文引用...")
     lookup = reader.build_name_to_pcode(laws)
     extractor = CitationExtractor(lookup)
     for law in laws:
@@ -40,9 +44,9 @@ def _build_graph(laws: list[Law]) -> None:
     Args:
         laws (list[Law]): 已載入的法律清單。
     """
-    print("\n建立圖結構...")
+    logger.info("建立圖結構...")
     LawGraphBuilder().build(laws)
-    print("圖結構建立完成")
+    logger.info("圖結構建立完成")
 
 
 def _build_chunks(builder: ChunkBuilder, laws: list[Law], force: bool) -> int:
@@ -58,55 +62,53 @@ def _build_chunks(builder: ChunkBuilder, laws: list[Law], force: bool) -> int:
         int: 本次新增的條文數量。
     """
     if force:
-        print("清除舊資料並重新建立 chunks...")
+        logger.info("清除舊資料並重新建立 chunks...")
         builder.clear()
     current = builder.count()
     if current > 0:
-        print(f"繼續建立 chunks（目前 {current} 筆）...")
+        logger.info(f"繼續建立 chunks（目前 {current} 筆）...")
     else:
-        print("建立 chunks...")
+        logger.info("建立 chunks...")
     t0 = time.time()
     added = builder.build(laws, batch_sleep=2.0)
     elapsed = time.time() - t0
     total = builder.count()
-    print(f"新增 {added} 筆，總計 {total} 筆，" f"耗時 {elapsed:.1f} 秒")
+    logger.info(f"新增 {added} 筆，總計 {total} 筆，" f"耗時 {elapsed:.1f} 秒")
     return added
 
 
-def _print_peek(builder: ChunkBuilder) -> None:
-    """印出 Chroma 內的條文樣本，供人工確認資料正確性。
+def _log_peek(builder: ChunkBuilder) -> None:
+    """記錄 Chroma 內的條文樣本，供人工確認資料正確性。
 
     Args:
         builder (ChunkBuilder): Chroma chunks collection 的查詢物件。
     """
-    print("\n--- Chroma 內的條文樣本 ---")
+    logger.info("--- Chroma 內的條文樣本 ---")
     for chunk in builder.peek_chunks(3):
-        print(f"id: {chunk.to_node_id()}")
         preview = chunk.to_document()[:60].replace("\n", " ")
-        print(f"  {preview}...")
-        print()
+        logger.info(f"id: {chunk.to_node_id()}  {preview}...")
 
 
-def _print_search(builder: ChunkBuilder) -> None:
+def _log_search(builder: ChunkBuilder) -> None:
     """以範例查詢示範語意搜尋結果。
 
     Args:
         builder (ChunkBuilder): Chroma chunks collection 的查詢物件。
     """
-    print(f"\n--- 語意搜尋：「{_SAMPLE_QUERY}」---")
+    logger.info(f"--- 語意搜尋：「{_SAMPLE_QUERY}」---")
     results = builder.search_chunks(_SAMPLE_QUERY, k=5)
     for i, chunk in enumerate(results, 1):
         score = chunk.score or 0.0
-        print(
-            f"{i}. [{chunk.law_name}] {chunk.article_no}"
-            f"  score={score:.4f}"
-        )
         preview = chunk.artical_content[:60].replace("\n", " ")
-        print(f"   {preview}...")
+        logger.info(
+            f"{i}. [{chunk.law_name}] {chunk.article_no}"
+            f"  score={score:.4f}  {preview}..."
+        )
 
 
 def main() -> None:
     """執行完整流程：載入法律、建圖、建立並查詢 Chroma chunks。"""
+    setup_logging()
     load_dotenv()
     parser = argparse.ArgumentParser(
         description="建立 Chroma chunks collection"
@@ -133,8 +135,8 @@ def main() -> None:
         embeddings=embeddings,
     )
     _build_chunks(builder, laws, force=args.force)
-    _print_peek(builder)
-    _print_search(builder)
+    _log_peek(builder)
+    _log_search(builder)
 
 
 if __name__ == "__main__":

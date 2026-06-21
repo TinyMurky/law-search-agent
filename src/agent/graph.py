@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import logging
+
 from langchain_google_genai import ChatGoogleGenerativeAI
 from langgraph.graph import END, START, StateGraph
 from langgraph.graph.state import CompiledStateGraph
@@ -17,6 +19,8 @@ from agent.state import AgenticRAGState
 from ingestion.law_graph.nx_law_graph import NxLawGraph
 from ingestion.law_vector.chunk_builder import ChunkBuilder
 
+logger = logging.getLogger(__name__)
+
 
 def _login_node(
     state: AgenticRAGState,
@@ -30,7 +34,7 @@ def _login_node(
     Returns:
         dict[str, str]: 寫入 judgment_api_token 欄位的 State 更新。
     """
-    print("[login] 司法院 API 登入（placeholder）")
+    logger.info("[login] 司法院 API 登入（placeholder）")
     return {"judgment_api_token": ""}
 
 

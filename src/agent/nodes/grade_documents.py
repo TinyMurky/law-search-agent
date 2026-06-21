@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 from collections.abc import Callable
 from typing import Literal
 
@@ -11,6 +12,8 @@ from pydantic import BaseModel, Field
 
 from agent.state import AgenticRAGState
 from agent.strategy_registry import STRATEGY_REGISTRY
+
+logger = logging.getLogger(__name__)
 
 # ── Pydantic schema ───────────────────────────────────────────────────
 
@@ -122,7 +125,7 @@ def make_grade_documents_node(
 
             if not config["requires_grading"]:
                 relevant_docs.append(doc)
-                print(f"[grade] Chunk {i + 1}：✓ {strategy}（跳過）")
+                logger.info(f"[grade] Chunk {i + 1}：✓ {strategy}（跳過）")
                 continue
 
             result: dict[str, object] = grader.invoke(
@@ -134,11 +137,15 @@ def make_grade_documents_node(
 
             if result["score"] == "yes":
                 relevant_docs.append(doc)
-                print(f"[grade] Chunk {i + 1}：✓ 相關")
+                logger.info(f"[grade] Chunk {i + 1}：✓ 相關")
             else:
-                print(f"[grade] Chunk {i + 1}：" f"✗ 不相關（{result['reason']}）")
+                logger.info(
+                    f"[grade] Chunk {i + 1}：" f"✗ 不相關（{result['reason']}）"
+                )
 
-        print(f"[grade] 保留 {len(relevant_docs)}" f"/{len(documents)} 個文件")
+        logger.info(
+            f"[grade] 保留 {len(relevant_docs)}" f"/{len(documents)} 個文件"
+        )
         return {
             "documents": relevant_docs,
             "grade_passed": len(relevant_docs) > 0,

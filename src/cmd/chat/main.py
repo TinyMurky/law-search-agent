@@ -13,6 +13,7 @@ from ingestion.law_graph.nx_law_graph import NxLawGraph
 from ingestion.law_ingestion.citation_extractor import CitationExtractor
 from ingestion.law_ingestion.law_reader import LawReader
 from ingestion.law_vector.chunk_builder import ChunkBuilder
+from logging_config import setup_logging
 
 _RAW_DATA = "raw_data/laws/ChLaw.json"
 _CHROMA_DIR = "data/chroma_db"
@@ -112,6 +113,7 @@ def _chat_loop(graph: CompiledStateGraph) -> None:
 
 def main() -> None:
     """載入依賴、編譯 Graph 並啟動互動式對話迴圈。"""
+    setup_logging()
     load_dotenv()
     api_key = os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY")
 

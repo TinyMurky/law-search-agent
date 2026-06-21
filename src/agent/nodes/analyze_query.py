@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 from collections.abc import Callable
 from typing import Literal
 
@@ -11,6 +12,8 @@ from pydantic import BaseModel, Field
 
 from agent.state import AgenticRAGState, SubQuery
 from ingestion.law_graph.nx_law_graph import NxLawGraph
+
+logger = logging.getLogger(__name__)
 
 # ── Pydantic schemas ──────────────────────────────────────────────────
 
@@ -393,7 +396,7 @@ def make_analyze_query_node(
         #     f"has_judgment：{ir['has_judgment_request']}"
         # )
 
-        print(f"[analyze_query]: 分類意圖與複雜度: {ir}\n")
+        logger.info(f"[analyze_query]: 分類意圖與複雜度: {ir}\n")
         # Step 2：依意圖 + 複雜度決定子查詢策略
         specs: list[SubQuerySpec]
 
@@ -423,7 +426,9 @@ def make_analyze_query_node(
                             article_no=_an,
                         )
                     )
-            print(f"[analyze_query] 策略：子查詢分解，{len(specs)} 個子查詢")
+            logger.info(
+                f"[analyze_query] 策略：子查詢分解，{len(specs)} 個子查詢"
+            )
 
         elif intent == "lookup" and ir["has_specific_article"]:
             _law = str(ir["law_name"]) if ir["law_name"] else None
@@ -431,7 +436,7 @@ def make_analyze_query_node(
             specs = _resolve_direct_lookup_specs(
                 question, _law, _art, law_graph
             )
-            print(
+            logger.info(
                 f"[analyze_query] 策略：direct_lookup"
                 f"（{ir['law_name']} {ir['article_no']}，"
                 f"{len(specs)} 個候選）"
@@ -445,7 +450,7 @@ def make_analyze_query_node(
                     strategy="law:hyde",
                 )
             ]
-            print("[analyze_query] 策略：HyDE")
+            logger.info("[analyze_query] 策略：HyDE")
 
         elif intent == "diagnostic":
             specs = [
@@ -454,7 +459,7 @@ def make_analyze_query_node(
                     strategy="law:graph_expand",
                 )
             ]
-            print("[analyze_query] 策略：graph_expand")
+            logger.info("[analyze_query] 策略：graph_expand")
 
         else:  # procedural
             rewritten = str(
@@ -470,7 +475,7 @@ def make_analyze_query_node(
                     strategy="law:semantic",
                 )
             ]
-            print("[analyze_query] 策略：查詢改寫")
+            logger.info("[analyze_query] 策略：查詢改寫")
 
         # Step 3：補判決書子查詢
         strategies = [s.strategy for s in specs]
@@ -482,7 +487,7 @@ def make_analyze_query_node(
                     strategy="judgment:tavily",
                 )
             )
-            print("[analyze_query] 加入判決書子查詢")
+            logger.info("[analyze_query] 加入判決書子查詢")
 
         return {
             "intent": intent,

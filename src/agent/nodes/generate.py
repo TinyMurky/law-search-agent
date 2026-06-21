@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 from collections.abc import Callable
 from typing import Literal
 
@@ -11,6 +12,8 @@ from langchain_google_genai import ChatGoogleGenerativeAI
 from pydantic import BaseModel, Field
 
 from agent.state import AgenticRAGState
+
+logger = logging.getLogger(__name__)
 
 # ── Pydantic schemas ──────────────────────────────────────────────────
 
@@ -252,7 +255,7 @@ def make_generate_node(
         chain = regenerate_chain if is_regenerate else generate_chain
         payload = {"context": context, "question": question}
         generation: str = chain.invoke(payload)
-        print(f"[generate] 生成完成（{len(generation)} 字）")
+        logger.info(f"[generate] 生成完成（{len(generation)} 字）")
 
         # 幻覺 grader
         hall_result: dict[str, object] = hallucination_grader.invoke(
@@ -262,7 +265,7 @@ def make_generate_node(
             }
         )
         hallucination_passed = hall_result["score"] == "yes"
-        print(
+        logger.info(
             f"[generate] 幻覺檢查："
             f"{'✓' if hallucination_passed else '✗'} "
             f"— {str(hall_result['reason'])[:60]}"
@@ -278,7 +281,7 @@ def make_generate_node(
                 }
             )
             answer_passed = ans_result["score"] == "yes"
-            print(
+            logger.info(
                 f"[generate] 回答品質："
                 f"{'✓' if answer_passed else '✗'} "
                 f"— {str(ans_result['missing'])[:60]}"
