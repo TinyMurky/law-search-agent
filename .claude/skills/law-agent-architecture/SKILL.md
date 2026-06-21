@@ -14,32 +14,58 @@ description: >
 
 ## 系統全貌
 
+MCP Server 與 FastAPI 是**兩個平行的對外介面**，各自直接呼叫同一個
+LangGraph Agent，不是「MCP 轉發給 FastAPI 再轉發給 Agent」的鏈接
+關係——見下方〈為什麼是平行而不是鏈接〉。
+
 ```
-Claude Desktop / Claude Code（使用者端）
-         │
-         │  MCP Streamable-HTTP (:8001)
-         ▼
- ┌───────────────────┐
- │   MCP Server      │  協議轉換層：把 MCP 請求翻譯成 HTTP call
- └────────┬──────────┘
-          │  HTTP SSE（內部 VPC）
-          ▼
- ┌───────────────────┐
- │   FastAPI         │  服務入口：管理請求、回應、串流
- └────────┬──────────┘
-          │  Python function call
-          ▼
- ┌───────────────────┐
- │  LangGraph Agent  │  決策核心：決定要查什麼、怎麼查
- └──────┬─────┬──────┘
-        │     │
-        ▼     ▼
-   Chroma   NetworkX      ← Phase 1
-  (向量搜尋) (圖遍歷)
-        │     │
-        └──┬──┘
-    (Phase 2 統一換成 Neo4j)
+Claude Desktop / Claude Code        Streamlit / 網頁前端
+         │                                  │
+         │ MCP Streamable-HTTP (:8001)      │ HTTP / SSE (:8000)
+         ▼                                  ▼
+ ┌────────────────┐               ┌────────────────────┐
+ │   MCP Server   │               │      FastAPI        │
+ │ 工具呼叫介面    │               │  服務入口/SSE 串流   │
+ └────────┬───────┘               └─────────┬───────────┘
+          │                                 │
+          │   Python function call（各自直接呼叫，不互相轉發）
+          └────────────────┬────────────────┘
+                            ▼
+                 ┌───────────────────┐
+                 │  LangGraph Agent  │  決策核心：決定要查什麼、怎麼查
+                 └──────┬─────┬──────┘
+                        │     │
+                        ▼     ▼
+                   Chroma   NetworkX      ← Phase 1
+                  (向量搜尋) (圖遍歷)
+                        │     │
+                        └──┬──┘
+                  (Phase 2 統一換成 Neo4j)
 ```
+
+### 為什麼是平行而不是鏈接
+
+一開始的規劃是 MCP Server 收到請求後轉發給 FastAPI（HTTP call），
+但實測後發現這個鏈接對 MCP 這條路徑沒有任何好處：MCP tool call
+在協議上是一次性 request/response，沒辦法把 FastAPI 的 SSE 串流
+逐字轉發給 Claude 客戶端，只能整批收完再回傳——也就是說，不管
+MCP Server 是去 HTTP 打 FastAPI 再累積，還是直接呼叫
+`law_graph.ainvoke(...)` 拿一個完整結果，對 Claude 客戶端而言
+結果完全一樣，多繞一層 HTTP 純粹是 overhead。
+
+因此兩個 interface 改成各自直接 `import` 並呼叫
+`src/agent/graph.py` 的 LangGraph Agent：
+- **FastAPI** 面向 Streamlit demo / 未來網頁前端，保留真正的逐 token
+  SSE 串流（`astream_events`）。
+- **MCP Server** 面向 Claude 客戶端，回傳完整結果（`ainvoke`），
+  可選搭配 `ctx.report_progress(...)` 給進度通知（不保證每個 host
+  都顯示成可見文字）。
+
+如果未來 MCP Server 與 FastAPI 真的需要拆成兩個獨立部署、獨立
+scale 的 service（例如其中一個對外網開放，另一個只留內網），
+中間補一層 HTTP 是合理的部署選擇，但那是**部署拓樸**的考量，
+不是協議相容性的要求——目前先以「同一個部署單位，兩個平行
+interface」設計。
 
 ---
 
@@ -47,9 +73,9 @@ Claude Desktop / Claude Code（使用者端）
 
 | 層級 | 職責 | 程式碼位置 | 實作狀態 |
 |---|---|---|---|
-| **MCP Server** | 把 MCP 協議轉成 FastAPI HTTP call | `src/cmd/mcp_server/` | 未實作 |
-| **FastAPI** | 對外 API、SSE 串流、呼叫 Agent | `src/cmd/api_server/` | 未實作 |
-| **LangGraph Agent** | 決策、工具選擇、對話管理 | `src/agent/` | 未實作 |
+| **MCP Server** | 把 MCP tool call 轉成對 Agent 的直接呼叫，回傳完整結果 | `src/cmd/mcp_server/` | 未實作 |
+| **FastAPI** | 對外 API、SSE 串流、直接呼叫 Agent | `src/cmd/api_server/` | 未實作 |
+| **LangGraph Agent** | 決策、工具選擇、對話管理（被 MCP Server 與 FastAPI 兩個 interface 共用） | `src/agent/` | 未實作 |
 | **DB Layer** | 向量搜尋 + 圖遍歷 | `src/ingestion/` | Phase 1 完成 |
 
 ---
@@ -75,7 +101,7 @@ Phase 2 的核心變化：Chroma + NetworkX 兩套系統統一換成一套 Neo4j
 
 | Reference 檔案 | 說明 |
 |---|---|
-| `references/mcp-layer.md` | MCP Server：工具定義、串流代理、Streamable-HTTP 設定 |
+| `references/mcp-layer.md` | MCP Server：工具定義、直接呼叫 Agent 的方式、Streamable-HTTP 設定 |
 | `references/api-layer.md` | FastAPI：endpoint 列表、SSE 串流寫法、與 Agent 的呼叫方式 |
 | `references/agent-layer.md` | **已過時，請改看 `law-rag-agent` skill**（State、Graph 流程、節點、Strategy Registry 的現行設計都在那裡）|
 | `references/db-layer.md` | DB Layer：Chroma + NetworkX（Phase 1）→ Neo4j（Phase 2） |
